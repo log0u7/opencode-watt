@@ -1,0 +1,8 @@
+pre-commit:
+  commands:
+    biome:
+      run: mise exec -- pnpm run check
+      stage_fixed: true
+    gitleaks:
+      run: gitleaks protect --staged --redact --verbose
+      stage_fixed: false
