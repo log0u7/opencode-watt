@@ -1,5 +1,11 @@
 # opencode-watt
 
+[![CI](https://github.com/log0u7/opencode-watt/actions/workflows/ci.yml/badge.svg)](https://github.com/log0u7/opencode-watt/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@log0u7/opencode-watt)](https://www.npmjs.com/package/@log0u7/opencode-watt)
+[![Node.js](https://img.shields.io/node/v/@log0u7/opencode-watt?logo=node.js&logoColor=white)](https://www.npmjs.com/package/@log0u7/opencode-watt)
+[![TypeScript](https://img.shields.io/github/package-json/dependency-version/log0u7/opencode-watt/dev/typescript?logo=typescript&logoColor=white)](https://github.com/log0u7/opencode-watt/blob/main/package.json)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Electric power and cost of **local LLM inference** for [OpenCode](https://opencode.ai).
 
 The plugin samples power meters on the machines doing inference, integrates energy
