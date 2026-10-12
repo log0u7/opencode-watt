@@ -1,8 +1,13 @@
+import { WattV2 } from "./plugin-v2.js";
 import { WattPlugin } from "./plugin.js";
 
-const pluginModule = {
-  id: "@log0u7/opencode-watt",
+/**
+ * Dual entrypoint: v1 hosts call `server()`, v2 hosts call `setup()`
+ * (see https://opencode.ai/v2/docs/build/plugins/migrate-v1).
+ */
+export const pluginModule = {
+  ...WattV2,
   server: WattPlugin,
-} satisfies { id: string; server: typeof WattPlugin };
+} satisfies { id: string; server: typeof WattPlugin; setup: (typeof WattV2)["setup"] };
 
 export default pluginModule;
