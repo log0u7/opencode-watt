@@ -332,6 +332,34 @@ describe("createEngine() reportData", () => {
     expect(data.budget).toEqual({ budget_kwh: 5, attributed_kwh: 0 });
     await engine.dispose();
   });
+
+  it("reports a single currency and no warning when every source shares one", async () => {
+    const engine = createEngine(busyCfg(), host, tmpStatePath(), [powerProbe("s", 40000)]);
+    const data = await engine.reportData("today", "s1");
+    expect(data.currencies).toEqual(["EUR"]);
+    const text = await engine.report("today", "s1");
+    expect(text).not.toContain("mix currencies");
+    await engine.dispose();
+  });
+
+  it("lists the distinct currencies and warns when sources mix them", async () => {
+    const engine = createEngine(
+      busyCfg({
+        prom: [
+          { base_url: "http://a:8428", country: "US", queries: [] },
+          { base_url: "http://b:8428", country: "FR", queries: [] },
+        ],
+      }),
+      host,
+      tmpStatePath(),
+    );
+    const data = await engine.reportData("today", "s1");
+    expect(new Set(data.currencies)).toEqual(new Set(["EUR", "USD"]));
+    const text = await engine.report("today", "s1");
+    expect(text).toContain("currencies: ");
+    expect(text).toContain("(totals mix currencies)");
+    await engine.dispose();
+  });
 });
 
 describe("createEngine() sampling backoff", () => {

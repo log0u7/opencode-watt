@@ -100,14 +100,18 @@ friends), clamped to [1, 2]: the kWh stays measured, only the money scales.
 Default `1`: price the kWh as measured.
 
 `power_cost` takes a `format` argument: `text` (default) or `json` (the same
-report as structured data: meters, rate, baseline, session/day/totals, probe
-statuses, budget).
+report as structured data: meters, rate, currencies, baseline,
+session/day/totals, probe statuses, budget).
 
 Pricing precedence per meter: explicit `price_per_kwh` > `windows` match at
 sample time > built-in `TARIFFS[country]` (approximate retail averages, early
 2026) > FR fallback. Remote targets can declare their own `country`: energy is
 priced where the hardware consumes it. Cost is accumulated per tick at the
-resolved rate, so sessions spanning HP/HC windows sum correctly.
+resolved rate, so sessions spanning HP/HC windows sum correctly. When targets
+declare different countries the day/all totals add costs in different
+currencies; the report lists them (`currencies: EUR, USD (totals mix
+currencies)`) and the per-source figures give the exact currency, but the
+totals themselves are not converted.
 
 ## Use
 

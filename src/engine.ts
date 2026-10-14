@@ -248,6 +248,7 @@ export function createEngine(
     scope: "session" | "today" | "all";
     meters: { source: string; id: string; watts: number; age_s: number }[];
     rate: ReturnType<typeof resolveRate>;
+    currencies: string[];
     baseline: { filled: number; window: number } | null;
     session: {
       attributed_kwh: number;
@@ -267,6 +268,11 @@ export function createEngine(
   ): Promise<ReportData> {
     const now = Date.now();
     const rate = rateFor(undefined, new Date(now));
+    // Every source may tariff in its own country's currency; the day/all totals
+    // add those costs anyway, so surface the set instead of hiding the mixing.
+    const currencies = [
+      ...new Set([rate.currency, ...probes.map((p) => rateFor(p.source, new Date(now)).currency)]),
+    ];
     const sessionEntry = state.sessions[sessionID] ?? null;
     const dayEntry = state.days[dayKey(new Date(now))] ?? null;
     let totals: ReportData["totals"] = null;
@@ -300,6 +306,7 @@ export function createEngine(
         age_s: (now - m.at) / 1000,
       })),
       rate,
+      currencies,
       baseline: cfg.subtract_idle && probes.length > 0 ? integrator.baselineProgress() : null,
       session:
         scope === "session" && sessionEntry
@@ -341,6 +348,9 @@ export function createEngine(
     lines.push(
       `rate: ${data.rate.price_per_kwh.toFixed(4)} ${data.rate.currency}/kWh (${data.rate.label}${cfg.subtract_idle ? ", idle subtracted" : ""})`,
     );
+    if (data.currencies.length > 1) {
+      lines.push(`currencies: ${data.currencies.join(", ")} (totals mix currencies)`);
+    }
     if (data.baseline) {
       lines.push(`baseline: ${data.baseline.filled}/${data.baseline.window} samples`);
     }
