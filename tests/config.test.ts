@@ -80,4 +80,53 @@ describe("normalizeConfig()", () => {
     expect(cfg.interval_ms).toBeGreaterThanOrEqual(200);
     expect(cfg.idle_interval_ms).toBeGreaterThanOrEqual(1000);
   });
+
+  it("clamps a numeric interval up to the floor instead of resetting it", () => {
+    expect(normalizeConfig({ interval_ms: 10 }).interval_ms).toBe(200);
+  });
+
+  it("normalizes country to an upper-case ISO alpha-2 code or null", () => {
+    expect(normalizeConfig({ country: "de" }).country).toBe("DE");
+    expect(normalizeConfig({ country: "Germany" }).country).toBeNull();
+    expect(normalizeConfig({ country: "F1" }).country).toBeNull();
+    expect(normalizeConfig({ country: 42 }).country).toBeNull();
+  });
+
+  it("trims and deduplicates meter prefixes", () => {
+    expect(normalizeConfig({ meters: ["  nvidia-smi ", "nvidia-smi", "rocm-smi"] }).meters).toEqual(
+      ["nvidia-smi", "rocm-smi"],
+    );
+    expect(normalizeConfig({ meters: ["   ", ""] }).meters).toBeNull();
+  });
+
+  it("drops a rate window with a negative price", () => {
+    const cfg = normalizeConfig({
+      windows: [
+        { start: "22:00", end: "06:00", price_per_kwh: -0.2 },
+        { start: "22:00", end: "06:00", price_per_kwh: 0 },
+      ],
+    });
+    expect(cfg.windows).toHaveLength(1);
+    expect(cfg.windows[0]?.price_per_kwh).toBe(0);
+  });
+
+  it("drops an ssh target whose host could inject ssh arguments", () => {
+    const cfg = normalizeConfig({
+      ssh: [{ host: "-oProxyCommand=touch /tmp/pwned" }, { host: "a b" }, { host: "good-host" }],
+    });
+    expect(cfg.ssh).toHaveLength(1);
+    expect(cfg.ssh[0]?.host).toBe("good-host");
+  });
+
+  it("drops a prom target whose base_url is not http(s)", () => {
+    const cfg = normalizeConfig({
+      prom: [
+        { base_url: "ftp://vm:8428", queries: [] },
+        { base_url: "vm:8428", queries: [] },
+        { base_url: "https://vm:8428", queries: [] },
+      ],
+    });
+    expect(cfg.prom).toHaveLength(1);
+    expect(cfg.prom[0]?.base_url).toBe("https://vm:8428");
+  });
 });
