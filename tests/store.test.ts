@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -174,6 +174,55 @@ describe("loadState()", () => {
     saveState(path, state);
     expect(loadState(path, Date.now()).days["2020-01-01"]).toBeDefined();
   });
+
+  it("does not crash and empties sessions when sessions is not an object", () => {
+    const path = tmpFile("bad-sessions.json");
+    writeFileSync(path, JSON.stringify({ version: 1, days: {}, sessions: 42, probe_status: {} }));
+    const state = loadState(path, 0);
+    expect(state.sessions).toEqual({});
+  });
+
+  it("does not crash and empties probe_status when it is not an object", () => {
+    const path = tmpFile("bad-status.json");
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, days: {}, sessions: {}, probe_status: "nope" }),
+    );
+    const state = loadState(path, 0);
+    expect(state.probe_status).toEqual({});
+  });
+
+  it("ignores a session entry with a negative or non-finite field", () => {
+    const path = tmpFile("bad-session.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        days: {},
+        sessions: {
+          neg: { model: "m", started: 1, last_active: 2, raw_j: -5, attributed_j: 1, cost: 0 },
+          nan: { model: "m", started: 1, last_active: 2, raw_j: "x", attributed_j: 1, cost: 0 },
+          ok: { model: "m", started: 1, last_active: 2, raw_j: 1, attributed_j: 1, cost: 0 },
+        },
+        probe_status: {},
+      }),
+    );
+    const state = loadState(path, 0);
+    expect(state.sessions.neg).toBeUndefined();
+    expect(state.sessions.nan).toBeUndefined();
+    expect(state.sessions.ok).toBeDefined();
+  });
+
+  it("ignores a day entry that is not an object", () => {
+    const path = tmpFile("bad-day.json");
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, days: { bad: 7, ok: { raw_j: 1, attributed_j: 1, cost: 0 } } }),
+    );
+    const state = loadState(path, 0);
+    expect(state.days.bad).toBeUndefined();
+    expect(state.days.ok).toBeDefined();
+  });
 });
 
 describe("saveState() atomicity", () => {
@@ -183,6 +232,12 @@ describe("saveState() atomicity", () => {
     const sibling = path.replace(/\.json$/, ".json.tmp");
     expect(() => readFileSync(sibling)).toThrow();
     expect(() => readFileSync(path)).not.toThrow();
+  });
+
+  it("writes the state file with owner-only permissions", () => {
+    const path = tmpFile("mode.json");
+    saveState(path, freshEntry());
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("overwrites previous content", () => {

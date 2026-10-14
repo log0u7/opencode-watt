@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SECURITY.md` (a `memory.db` store that does not exist here).
 - Type error in `tests/sampler.test.ts` (imported `Sample` from the wrong
   module), now caught by the test type-check.
+- State store: a state file whose `sessions`/`probe_status` were not objects, or
+  whose entries carried non-finite/negative numbers, used to make every sampling
+  tick throw and silently stop accounting. Such entries are now validated and
+  dropped on load instead of poisoning the whole run.
+- State store: `saveState` now writes to a temp file, `fsync`s it and only then
+  renames, so a crash mid-write can no longer truncate the state; the file is
+  written with owner-only permissions (0600).
 - Probes: the failure counter was frozen just past the backoff threshold, so a
   transient fault disabled a probe for the rest of the process; it now retries
   every ten ticks and recovers. RAPL now uses the same backoff instead of
