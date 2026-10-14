@@ -42,6 +42,13 @@ describe("cost()", () => {
   it("is zero for zero joules", () => {
     expect(cost(0, { price_per_kwh: 0.2, currency: "EUR", label: "x" })).toBe(0);
   });
+
+  it("applies the wall factor to the price only", () => {
+    const rate = { price_per_kwh: 0.2, currency: "EUR", label: "x" };
+    expect(cost(3_600_000, rate, 1.1)).toBeCloseTo(0.22, 10);
+    expect(cost(3_600_000, rate, 2)).toBeCloseTo(0.4, 10);
+    expect(cost(3_600_000, rate)).toBeCloseTo(0.2, 10); // default 1
+  });
 });
 
 describe("detectCountry()", () => {

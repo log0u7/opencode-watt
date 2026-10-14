@@ -65,6 +65,14 @@ describe("buildProbes() meters filter", () => {
     expect(probes.map((p) => p.source)).toContain("nvidia-smi@box");
     expect(countries.get("nvidia-smi@box")).toBe("FR");
   });
+
+  it("registers a prom target with its country mapping", () => {
+    const { probes, countries } = buildProbes(
+      normalizeConfig({ prom: [{ base_url: "http://vm:8428", country: "DE", queries: [] }] }),
+    );
+    expect(probes.map((p) => p.source)).toContain("prom@vm:8428");
+    expect(countries.get("prom@vm:8428")).toBe("DE");
+  });
 });
 
 describe("createEngine() tick isolation", () => {
@@ -276,6 +284,27 @@ describe("createEngine() reportData", () => {
     engine.handleStatus("s1", "busy");
     await vi.advanceTimersByTimeAsync(1000);
     expect(notified).toHaveLength(0);
+    await engine.dispose();
+  });
+
+  it("renders the empty branches of the text report", async () => {
+    const engine = createEngine(busyCfg(), host, tmpStatePath(), [powerProbe("s", 40000)]);
+    // no tick has run yet: meters are empty, today and all are zeroed
+    const noSamples = await engine.report("today", "s1");
+    expect(noSamples).toContain("no samples yet");
+    expect(noSamples).toContain("today: no energy recorded yet (raw 0.0000 kWh)");
+
+    const allEmpty = await engine.report("all", "s1");
+    expect(allEmpty).toContain("all: 0.0000 kWh");
+    await engine.dispose();
+  });
+
+  it("exposes the budget in reportData when configured", async () => {
+    const engine = createEngine(busyCfg({ daily_budget_kwh: 5 }), host, tmpStatePath(), [
+      powerProbe("s", 40000),
+    ]);
+    const data = await engine.reportData("today", "s1");
+    expect(data.budget).toEqual({ budget_kwh: 5, attributed_kwh: 0 });
     await engine.dispose();
   });
 });
