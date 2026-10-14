@@ -70,6 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`currencies`) and the text report warns `currencies: EUR, USD (totals mix
   currencies)` when targets resolve to more than one currency, instead of
   silently presenting a mixed sum under the default currency.
+- Packaging: `@opencode-ai/plugin` and `@opencode/plugin` are declared as
+  optional `peerDependencies`. They were `devDependencies` only while
+  `index.ts` imports `@opencode-ai/plugin` as a value, so a v2 host that did
+  not provide it failed at module load; the dependency relationship is now
+  explicit.
+- The `power_cost` tool description and its `scope`/`format` enums are defined
+  once (`src/tool-meta.ts`) and shared by the v1 (zod) and v2 (JSON Schema)
+  entrypoints, with a test pinning both to the same constant.
 
 ## [0.2.0] - 2026-10-14
 

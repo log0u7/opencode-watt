@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WattPlugin, type WattPluginOptions } from "../src/plugin.js";
 import type { Probe, ProbeResult } from "../src/probes.js";
 import type { State } from "../src/store.js";
+import { TOOL_DESCRIPTION } from "../src/tool-meta.js";
 
 type AnyPlugin = Parameters<typeof WattPlugin>[0];
 
@@ -244,6 +245,11 @@ describe("WattPlugin", () => {
     )) as string;
     expect(out).toContain("0.0050 kWh");
     await second.dispose?.();
+  });
+
+  it("uses the shared tool description (no drift with v2)", async () => {
+    const hooks = await WattPlugin(fakeInput(), baseOpts(tmpStatePath(), []));
+    expect(hooks.tool?.power_cost.description).toBe(TOOL_DESCRIPTION);
   });
 
   it("stops sampling after dispose", async () => {
