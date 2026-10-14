@@ -73,6 +73,21 @@ describe("buildProbes() meters filter", () => {
     expect(probes.map((p) => p.source)).toContain("prom@vm:8428");
     expect(countries.get("prom@vm:8428")).toBe("DE");
   });
+
+  it("keeps two prom targets on the same host but different paths distinct", () => {
+    const { probes } = buildProbes(
+      normalizeConfig({
+        prom: [
+          { base_url: "http://vm:8428/prom", queries: [] },
+          { base_url: "http://vm:8428/vm", queries: [] },
+        ],
+      }),
+    );
+    const sources = probes.filter((p) => p.source.startsWith("prom@")).map((p) => p.source);
+    expect(new Set(sources).size).toBe(2);
+    expect(sources).toContain("prom@vm:8428/prom");
+    expect(sources).toContain("prom@vm:8428/vm");
+  });
 });
 
 describe("createEngine() tick isolation", () => {
@@ -165,6 +180,16 @@ describe("createEngine() session lifecycle", () => {
     await vi.advanceTimersByTimeAsync(250);
     engine.handleStatus("s1", "idle");
     expect(engine.state.sessions.s1?.last_active).toBeGreaterThan(0);
+    await engine.dispose();
+  });
+
+  it("treats a provider retry status as busy so imputation is not lost", async () => {
+    const engine = createEngine(busyCfg(), host, tmpStatePath(), [powerProbe("s", 40000)]);
+    engine.handleStatus("s1", "busy");
+    await vi.advanceTimersByTimeAsync(250); // first sighting
+    engine.handleStatus("s1", "retry"); // 429/5xx backoff must not drop the session
+    await vi.advanceTimersByTimeAsync(250); // accrual continues: 10000 J
+    expect(engine.state.sessions.s1?.attributed_j).toBeGreaterThan(9_000);
     await engine.dispose();
   });
 });

@@ -80,6 +80,12 @@ All options are optional; pass them in the plugin tuple:
 disable connection reuse for a given run (or per target with
 `"control_master": false`).
 
+Each target becomes a meter source named after its host (`prom@host[:port][/path]`,
+`nvidia-smi@host`, ...). Use distinct hosts for `ssh` targets: two entries with
+the same host collide on the same source and are counted as one meter. `prom`
+targets on the same host stay distinct as long as their paths or ports differ
+(`http://vm:8428/prom` and `http://vm:8428/vm` are two meters).
+
 `meters` is an optional allowlist of source prefixes (`"meters": ["nvidia-smi"]`
 keeps nvidia-smi on every target, local and remote, and drops rocm-smi, RAPL and
 hwmon). Use it when two meters report the same device: on an AMD host,

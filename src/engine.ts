@@ -23,6 +23,9 @@ const SAVE_INTERVAL_MS = 60_000;
 const EXEC_TIMEOUT_MS = 5000;
 const MAX_MISS_STREAK = 6; // 2**6 = 64x the configured interval
 
+// Mirrors the SDK `SessionStatus["type"]` union (idle | retry | busy).
+export type SessionStatusType = "idle" | "retry" | "busy";
+
 export const kwh = (joules: number): string => (joules / JOULES_PER_KWH).toFixed(4);
 
 export function buildProbes(cfg: WattConfig): {
@@ -37,7 +40,10 @@ export function buildProbes(cfg: WattConfig): {
   probes.push(...hwmonProbes(nodeList, nodeRead, "local"));
   const countries = new Map<string, string | null>();
   for (const target of cfg.ssh) {
-    for (const p of sshProbes(nodeExec, { ...target, control_master: cfg.ssh_control })) {
+    for (const p of sshProbes(nodeExec, {
+      ...target,
+      control_master: target.control_master ?? cfg.ssh_control,
+    })) {
       probes.push(p);
       countries.set(p.source, target.country ?? null);
     }
@@ -196,8 +202,10 @@ export function createEngine(
   schedule(0);
   void log("info", `opencode-watt started with ${probes.length} meter source(s)`);
 
-  const handleStatus = (sessionID: string, status: "busy" | string): void => {
-    if (status === "busy") {
+  const handleStatus = (sessionID: string, status: SessionStatusType): void => {
+    // "retry" (provider 429/5xx backoff) is still active: keeping the session
+    // busy preserves its imputation and the tail instead of dropping it mid-turn.
+    if (status === "busy" || status === "retry") {
       busy.add(sessionID);
       ensureEntry(sessionID);
       tailUntil = 0;

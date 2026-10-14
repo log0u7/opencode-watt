@@ -49,7 +49,7 @@ function powerProbe(source: string, watts: number, calls?: { n: number }): Probe
   };
 }
 
-const statusEvent = (sessionID: string, type: "busy" | "idle") =>
+const statusEvent = (sessionID: string, type: "busy" | "idle" | "retry") =>
   ({ event: { type: "session.status", properties: { sessionID, status: { type } } } }) as never;
 
 const idleEvent = (sessionID: string) =>
@@ -96,6 +96,18 @@ describe("WattPlugin", () => {
       | undefined;
     expect(firstCall?.body.message).toContain("0.0083 kWh");
     expect(existsSync(statePath)).toBe(true);
+  });
+
+  it("keeps imputing across a provider retry (busy -> retry -> idle)", async () => {
+    const input = fakeInput();
+    const hooks = await WattPlugin(input, baseOpts(tmpStatePath(), [powerProbe("s", 40000)]));
+    await hooks.event?.(statusEvent("s1", "busy"));
+    await vi.advanceTimersByTimeAsync(250); // first sighting
+    await hooks.event?.(statusEvent("s1", "retry"));
+    await vi.advanceTimersByTimeAsync(250); // accrual continues during the retry
+    await vi.advanceTimersByTimeAsync(250);
+    await hooks.event?.(idleEvent("s1"));
+    expect(input.client.tui.showToast).toHaveBeenCalledTimes(1);
   });
 
   it("stays silent on idle when the session used less than 1 Wh", async () => {
