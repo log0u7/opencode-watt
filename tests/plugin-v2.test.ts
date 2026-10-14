@@ -7,6 +7,7 @@ import type { Plugin } from "@opencode/plugin";
 
 import type { Probe } from "../src/probes.js";
 import type { WattPluginOptions } from "../src/plugin.js";
+import { TOOL_DESCRIPTION, TOOL_FORMATS, TOOL_SCOPES } from "../src/tool-meta.js";
 import { pluginModule } from "../src/index.js";
 
 const dirs: string[] = [];
@@ -169,6 +170,18 @@ describe("opencode-watt v2 setup", () => {
     expect(out?.content).toContain("prov/mdl");
     expect(existsSync(statePath)).toBe(true);
 
+    await cleanup?.();
+  });
+
+  it("shares the tool description and enums with v1 (no drift)", async () => {
+    const { ctx, added } = fakeCtx(tmpStatePath(), []);
+    const cleanup = await pluginModule.setup(ctx);
+    const tool = added.find((t) => t.name === "power_cost");
+    expect(tool?.description).toBe(TOOL_DESCRIPTION);
+    const props = (tool as unknown as { input: { properties: Record<string, unknown> } }).input
+      .properties;
+    expect((props.scope as { enum?: string[] }).enum).toEqual([...TOOL_SCOPES]);
+    expect((props.format as { enum?: string[] }).enum).toEqual([...TOOL_FORMATS]);
     await cleanup?.();
   });
 

@@ -5,6 +5,13 @@ import { normalizeConfig, type WattConfig } from "./config.js";
 import { createEngine } from "./engine.js";
 import type { Probe } from "./probes.js";
 import { statePath } from "./store.js";
+import {
+  FORMAT_DESCRIPTION,
+  SCOPE_DESCRIPTION,
+  TOOL_DESCRIPTION,
+  TOOL_FORMATS,
+  TOOL_SCOPES,
+} from "./tool-meta.js";
 
 export type WattPluginOptions = WattConfig & {
   state_path?: string;
@@ -38,17 +45,16 @@ export const WattPlugin: Plugin = async (input, rawOptions) => {
   const hooks: Hooks = {
     tool: {
       power_cost: tool({
-        description:
-          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all, idle baseline, probe statuses; scope/format args, json available). Warns once per day when the configured daily budget is exceeded.",
+        description: TOOL_DESCRIPTION,
         args: {
           scope: tool.schema
-            .enum(["session", "today", "all"])
+            .enum([...TOOL_SCOPES])
             .optional()
-            .describe("Report scope: current session (default), today, or all recorded days"),
+            .describe(SCOPE_DESCRIPTION),
           format: tool.schema
-            .enum(["text", "json"])
+            .enum([...TOOL_FORMATS])
             .optional()
-            .describe("Output format: human-readable text (default) or JSON"),
+            .describe(FORMAT_DESCRIPTION),
         },
         execute: async (args, context) => {
           const scope = args.scope ?? "session";

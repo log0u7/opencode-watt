@@ -46,6 +46,18 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.18.32",
+    "@opencode/plugin": "^2.0.26"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    },
+    "@opencode/plugin": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@opencode-ai/plugin": "1.18.32",

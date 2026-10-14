@@ -4,6 +4,15 @@ import { normalizeConfig } from "./config.js";
 import { createEngine, kwh, WH_TO_J } from "./engine.js";
 import type { WattPluginOptions } from "./plugin.js";
 import { statePath } from "./store.js";
+import {
+  FORMAT_DESCRIPTION,
+  SCOPE_DESCRIPTION,
+  TOOL_DESCRIPTION,
+  TOOL_FORMATS,
+  TOOL_SCOPES,
+  type Format,
+  type Scope,
+} from "./tool-meta.js";
 
 export const WattV2 = Plugin.define({
   id: "@log0u7/opencode-watt",
@@ -30,28 +39,27 @@ export const WattV2 = Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "power_cost",
-        description:
-          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all, idle baseline, probe statuses; scope/format args, json available). Warns once per day when the configured daily budget is exceeded.",
+        description: TOOL_DESCRIPTION,
         input: {
           type: "object",
           properties: {
             scope: {
               type: "string",
-              enum: ["session", "today", "all"],
-              description: "Report scope: current session (default), today, or all recorded days",
+              enum: [...TOOL_SCOPES],
+              description: SCOPE_DESCRIPTION,
             },
             format: {
               type: "string",
-              enum: ["text", "json"],
-              description: "Output format: human-readable text (default) or JSON",
+              enum: [...TOOL_FORMATS],
+              description: FORMAT_DESCRIPTION,
             },
           },
           additionalProperties: false,
         },
         async execute(input, context) {
           const { scope, format } = input as {
-            scope?: "session" | "today" | "all";
-            format?: "text" | "json";
+            scope?: Scope;
+            format?: Format;
           };
           const resolved = scope ?? "session";
           return {
