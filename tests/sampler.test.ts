@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { EnergyIntegrator, type Sample } from "../src/sampler.js";
+import { EnergyIntegrator } from "../src/sampler.js";
+import type { Sample } from "../src/probes.js";
 
 const power = (id: string, watts: number, at: number): Sample => ({
   kind: "power",

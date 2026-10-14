@@ -21,7 +21,7 @@ Dependabot prepares, humans decide. It opens grouped PRs weekly (7-day supply-ch
 
 A dependency PR merges only when:
 
-- CI is green (quality matrix + coverage gate, gitleaks on push).
+- CI is green (quality matrix + coverage gate, gitleaks on PR and push).
 - No breaking change to our usage. For majors: coupled deps arrive together (vitest with `@vitest/coverage-v8`), and upstream breaking changes are checked against our hooks and tools.
 - `@types/node` never exceeds the max Node version actually tested in CI (currently 24).
 - Security patches are always accepted.
@@ -36,11 +36,11 @@ Every behavior change ships with tests, written test-first (red-green-refactor):
 2. Implement the minimal code that makes it pass (green).
 3. Refactor with tests green.
 
-CI enforces a coverage gate (90% lines/functions, 80% branches) via `pnpm verify`; a PR without tests or below the threshold fails. Unit tests use real filesystem (temp dirs) and real SQLite: no mocks. Mocks are allowed only at true network/tool boundaries (mDNS, external CLIs).
+CI enforces a coverage gate (90% lines/functions, 80% branches) via `pnpm verify`; a PR without tests or below the threshold fails. Unit tests use the real filesystem (temp dirs): no mocks. Mocks are allowed only at true network/tool boundaries (external CLIs, HTTP fetch).
 
 ```sh
 pnpm test:coverage   # full suite with coverage report
-pnpm verify          # biome + typecheck + tests (coverage gate)
+pnpm verify          # biome + typecheck (src and tests) + tests (coverage gate)
 pnpm build:check     # tsc build + pack dry-run
 ```
 
