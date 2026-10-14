@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@types/node` pinned to the lowest supported Node line (`^22`) instead of the
   newest available, matching the CI matrix.
 - gitleaks runs on pull requests as well as pushes to `main`.
+- Probes that exit successfully but parse no sample (nvidia-smi, rocm-smi,
+  Prometheus) now report `absent` instead of `ok`, so a broken meter no longer
+  resets the miss counter and silently looks healthy.
 
 ### Fixed
 
@@ -22,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SECURITY.md` (a `memory.db` store that does not exist here).
 - Type error in `tests/sampler.test.ts` (imported `Sample` from the wrong
   module), now caught by the test type-check.
+- Probes: the failure counter was frozen just past the backoff threshold, so a
+  transient fault disabled a probe for the rest of the process; it now retries
+  every ten ticks and recovers. RAPL now uses the same backoff instead of
+  retrying (or not) unconditionally.
+- Probes: a hwmon listing that failed once no longer froze the probe as
+  permanently absent; the listing is retried until it succeeds.
 - Sampler: a backwards clock step (or two readings sharing a timestamp) no
   longer produces a `delta / 1e-9` energy spike that poisoned the idle baseline;
   the interval is skipped and resynced.

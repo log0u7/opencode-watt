@@ -117,6 +117,29 @@ describe("nvidiaSmiProbe()", () => {
     expect(exec).toHaveBeenCalledTimes(2); // tick 3 within backoff window skipped
     expect((await probe.sample(3)).status).toBe("unreachable");
   });
+
+  it("retries a transient failure after backoff instead of disabling the probe", async () => {
+    let calls = 0;
+    const exec: ExecFn = async () => {
+      calls++;
+      return calls <= 2
+        ? ({ ok: false, code: "TIMEOUT" } as ExecResult)
+        : ({ ok: true, stdout: "0, RTX, 50" } as ExecResult);
+    };
+    const probe = nvidiaSmiProbe(exec, "local", 1000);
+    let res = await probe.sample(1);
+    for (let t = 2; t <= 12; t++) res = await probe.sample(t);
+    expect(res.status).toBe("ok");
+    expect(res.samples).toHaveLength(1);
+    expect(calls).toBe(3); // 2 failures, then the retry once the backoff window elapsed
+  });
+
+  it("reports absent when the command succeeds but yields no rows", async () => {
+    const probe = nvidiaSmiProbe(okExec(""), "local", 1000);
+    const res = await probe.sample(1);
+    expect(res.status).toBe("absent");
+    expect(res.samples).toEqual([]);
+  });
 });
 
 describe("rocmSmiProbe()", () => {
@@ -130,6 +153,11 @@ describe("rocmSmiProbe()", () => {
 
   it("marks absent on ENOENT", async () => {
     const probe = rocmSmiProbe(errExec("ENOENT"), "local", 1000);
+    expect((await probe.sample(1)).status).toBe("absent");
+  });
+
+  it("reports absent when the command succeeds but yields no rows", async () => {
+    const probe = rocmSmiProbe(okExec("{}"), "local", 1000);
     expect((await probe.sample(1)).status).toBe("absent");
   });
 });
@@ -376,6 +404,20 @@ describe("hwmonProbes()", () => {
     expect((await probes[0].sample(1)).status).toBe("absent");
   });
 
+  it("retries the listing after a transient error instead of freezing absent", async () => {
+    let listings = 0;
+    const list: ListFn = (p) => {
+      listings++;
+      if (listings === 1) throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return listFn(p);
+    };
+    const probes = hwmonProbes(list, readFn, "local");
+    expect((await probes[0].sample(1)).status).toBe("absent");
+    const res = await probes[0].sample(2);
+    expect(res.status).toBe("ok");
+    expect(res.samples.length).toBeGreaterThan(0);
+  });
+
   it("ignores a sensor whose value is not a finite number", async () => {
     const weird: ReadFn = (p) => (p.endsWith("power1_average") ? "  N/A  \n" : readFn(p));
     const probes = hwmonProbes(listFn, weird, "local");
@@ -516,5 +558,16 @@ describe("promProbe()", () => {
       cfg,
     );
     expect((await bad.sample(1)).status).toBe("error");
+  });
+
+  it("reports absent when the query returns no series", async () => {
+    const fetchFn = async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "success", data: { result: [] } }),
+      }) as never;
+    const probe = promProbe(fetchFn, cfg);
+    expect((await probe.sample(1)).status).toBe("absent");
   });
 });

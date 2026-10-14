@@ -70,6 +70,9 @@ class Guard {
       return { samples: [], status: this.last };
     }
     if (this.last !== "ok" && !this.canAttempt(this)) {
+      // Count the skipped tick too: otherwise `failures` freezes just past the
+      // retry threshold and the "every 10 ticks" branch is never reached.
+      this.failures++;
       return { samples: [], status: this.last };
     }
     const res = await attempt();
@@ -258,7 +261,8 @@ export function nvidiaSmiProbe(exec: ExecFn, target: string, timeoutMs: number):
       timeoutMs,
     );
     if (!res.ok) return { samples: [], status: statusFromExec(res.code) };
-    return { samples: nvidiaSamples(source, parseNvidiaCsv(res.stdout), now), status: "ok" };
+    const samples = nvidiaSamples(source, parseNvidiaCsv(res.stdout), now);
+    return { samples, status: samples.length > 0 ? "ok" : "absent" };
   });
 }
 
@@ -267,7 +271,8 @@ export function rocmSmiProbe(exec: ExecFn, target: string, timeoutMs: number): P
   return guardedProbe(source, async (now) => {
     const res = await exec("rocm-smi", ["--showpower", "--json"], timeoutMs);
     if (!res.ok) return { samples: [], status: statusFromExec(res.code) };
-    return { samples: rocmSamples(source, parseRocmJson(res.stdout), now), status: "ok" };
+    const samples = rocmSamples(source, parseRocmJson(res.stdout), now);
+    return { samples, status: samples.length > 0 ? "ok" : "absent" };
   });
 }
 
@@ -276,7 +281,7 @@ export function rocmSmiProbe(exec: ExecFn, target: string, timeoutMs: number): P
 export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] {
   const source = `rapl@${target}`;
   const base = "/sys/class/powercap";
-  const guard = new Guard(() => true); // rapl: any failure is permanent (denied/absent)
+  const guard = new Guard(); // transient failures retry; absent/denied stay permanent
   type Zone = { path: string; id: string; max_uj: number | null };
   let zones: Zone[] | null = null;
 
@@ -379,13 +384,16 @@ export function hwmonProbes(list: ListFn, read: ReadFn, target: string): Probe[]
       sample: async (now) => {
         if (chips === null) {
           try {
-            chips = (await list(base)).filter((n) => /^hwmon\d+$/.test(n));
+            const found = (await list(base)).filter((n) => /^hwmon\d+$/.test(n));
+            if (found.length > 0) {
+              chips = found;
+              paths = null;
+            }
           } catch {
-            chips = [];
+            // transient listing error: stay unresolved and retry on the next tick
           }
-          paths = null;
+          if (chips === null) return { samples: [], status: "absent" };
         }
-        if (chips.length === 0) return { samples: [], status: "absent" };
 
         if (paths === null || now - resolvedAt > HWMON_REFRESH_MS) {
           const found: { id: string; path: string }[] = [];
@@ -612,7 +620,7 @@ export function promProbe(
         } catch {
           return { samples: [], status: "unreachable" as ProbeStatus };
         }
-        return { samples, status: "ok" };
+        return { samples, status: samples.length > 0 ? "ok" : "absent" };
       });
       return res;
     },
