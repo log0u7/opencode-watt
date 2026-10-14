@@ -196,6 +196,90 @@ describe("createEngine() idle baseline", () => {
   });
 });
 
+describe("createEngine() reportData", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns structured data with meters, rate, baseline and session", async () => {
+    const engine = createEngine(busyCfg({ subtract_idle: true }), host, tmpStatePath(), [
+      powerProbe("s", 40000),
+    ]);
+    engine.handleStatus("s1", "busy");
+    engine.setModel("s1", "prov/mdl");
+    await vi.advanceTimersByTimeAsync(750);
+
+    const data = await engine.reportData("session", "s1");
+    expect(data.scope).toBe("session");
+    expect(data.meters.some((m) => m.source === "s")).toBe(true);
+    expect(data.rate.currency).toBe("EUR");
+    expect(data.baseline).not.toBeNull();
+    expect(data.session?.model).toBe("prov/mdl");
+    // The seeded baseline equals the busy sample here, so attribution floors
+    // at zero by design; raw energy is unaffected.
+    expect(data.session?.raw_kwh).toBeGreaterThan(0);
+    expect(data.probes.s).toBe("ok");
+    await engine.dispose();
+  });
+
+  it("returns day totals for the today scope and null session", async () => {
+    const engine = createEngine(busyCfg(), host, tmpStatePath(), [powerProbe("s", 40000)]);
+    engine.handleStatus("s1", "busy");
+    await vi.advanceTimersByTimeAsync(500);
+    const data = await engine.reportData("today", "s1");
+    expect(data.session).toBeNull();
+    expect(data.day?.attributed_kwh).toBeGreaterThan(0);
+    await engine.dispose();
+  });
+
+  it("toasts once per day when the daily budget is exceeded", async () => {
+    const notified: string[] = [];
+    const engine = createEngine(
+      busyCfg({ daily_budget_kwh: 0.001 }),
+      {
+        log: async () => {},
+        notify: async (m) => {
+          notified.push(m);
+        },
+      },
+      tmpStatePath(),
+      [powerProbe("s", 40000)],
+    );
+    engine.handleStatus("s1", "busy");
+    // 0.001 kWh = 3600 J; each busy tick accrues 10000 J
+    await vi.advanceTimersByTimeAsync(750);
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain("budget");
+
+    await vi.advanceTimersByTimeAsync(2000); // more ticks over budget
+    expect(notified).toHaveLength(1); // still once per day
+    await engine.dispose();
+  });
+
+  it("does not toast when no budget is configured", async () => {
+    const notified: string[] = [];
+    const engine = createEngine(
+      busyCfg(),
+      {
+        log: async () => {},
+        notify: async (m) => {
+          notified.push(m);
+        },
+      },
+      tmpStatePath(),
+      [powerProbe("s", 40000)],
+    );
+    engine.handleStatus("s1", "busy");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(notified).toHaveLength(0);
+    await engine.dispose();
+  });
+});
+
 describe("createEngine() sampling backoff", () => {
   beforeEach(() => {
     vi.useFakeTimers();

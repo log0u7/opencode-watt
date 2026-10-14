@@ -184,6 +184,34 @@ describe("WattPlugin", () => {
     expect(out).toContain("no meters");
   });
 
+  it("returns JSON when format json is requested", async () => {
+    const statePath = tmpStatePath();
+    const hooks = await WattPlugin(fakeInput(), baseOpts(statePath, [powerProbe("s", 40000)]));
+    await hooks.event?.(statusEvent("s1", "busy"));
+    await vi.advanceTimersByTimeAsync(500);
+
+    const out = (await hooks.tool?.power_cost.execute(
+      { scope: "session", format: "json" } as never,
+      {
+        sessionID: "s1",
+      } as never,
+    )) as string;
+    const parsed = JSON.parse(out) as {
+      meters: { source: string }[];
+      session: { raw_kwh: number };
+    };
+    expect(parsed.meters.some((m) => m.source === "s")).toBe(true);
+    expect(parsed.session?.raw_kwh).toBeGreaterThan(0);
+
+    const text = (await hooks.tool?.power_cost.execute(
+      { scope: "session" } as never,
+      {
+        sessionID: "s1",
+      } as never,
+    )) as string;
+    expect(text).toContain("power_cost (session)"); // text stays the default
+  });
+
   it("persists state across plugin restarts", async () => {
     const statePath = tmpStatePath();
     const first = await WattPlugin(fakeInput(), baseOpts(statePath, [powerProbe("s", 36000)]));

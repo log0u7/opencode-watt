@@ -39,14 +39,23 @@ export const WattPlugin: Plugin = async (input, rawOptions) => {
     tool: {
       power_cost: tool({
         description:
-          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all).",
+          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all, idle baseline, probe statuses; scope/format args, json available). Warns once per day when the configured daily budget is exceeded.",
         args: {
           scope: tool.schema
             .enum(["session", "today", "all"])
             .optional()
             .describe("Report scope: current session (default), today, or all recorded days"),
+          format: tool.schema
+            .enum(["text", "json"])
+            .optional()
+            .describe("Output format: human-readable text (default) or JSON"),
         },
-        execute: (args, context) => engine.report(args.scope ?? "session", context.sessionID),
+        execute: async (args, context) => {
+          const scope = args.scope ?? "session";
+          return args.format === "json"
+            ? JSON.stringify(await engine.reportData(scope, context.sessionID), null, 2)
+            : engine.report(scope, context.sessionID);
+        },
       }),
     },
     event: async ({ event }) => {

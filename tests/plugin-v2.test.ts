@@ -48,8 +48,10 @@ function baseOpts(statePath: string, probes: Probe[]): Partial<WattPluginOptions
 type TestEvent = { type: string; data: Record<string, unknown> };
 type AddedTool = {
   name: string;
+  description: string;
+  input: { properties: Record<string, unknown> };
   execute: (
-    input: { scope?: "session" | "today" | "all" },
+    input: { scope?: "session" | "today" | "all"; format?: "text" | "json" },
     context: { sessionID: string },
   ) => Promise<{ content?: string }>;
 };
@@ -141,6 +143,13 @@ describe("opencode-watt v2 setup", () => {
 
     const tool = added.find((t) => t.name === "power_cost");
     expect(tool).toBeDefined();
+    // Doc sync guard: the tool description is what the model reads; it must
+    // mention every user-facing capability (format json, daily budget toast).
+    expect(tool?.description).toContain("json");
+    expect(tool?.description).toContain("budget");
+    const format = (tool as unknown as { input: { properties: Record<string, unknown> } }).input
+      .properties.format as { enum?: string[] };
+    expect(format?.enum).toEqual(["text", "json"]);
 
     const modelHook = sessionHooks.get("model.request");
     expect(modelHook).toBeDefined();

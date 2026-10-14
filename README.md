@@ -67,7 +67,8 @@ All options are optional; pass them in the plugin tuple:
           "auth_token_env": "PROM_TOKEN"
         }
       ],
-      "meters": null
+      "meters": null,
+      "daily_budget_kwh": null
     ]
   }
 }
@@ -84,6 +85,13 @@ hwmon). Use it when two meters report the same device: on an AMD host,
 `rocm-smi` and the amdgpu hwmon entry both expose the GPU and would double-count
 it (`"meters": ["rocm-smi"]` keeps one). Default `null`: every available meter.
 
+`daily_budget_kwh` triggers a TUI toast once per day as soon as attributed
+energy for the day crosses the threshold. Default `null`: no budget.
+
+`power_cost` takes a `format` argument: `text` (default) or `json` (the same
+report as structured data: meters, rate, baseline, session/day/totals, probe
+statuses, budget).
+
 Pricing precedence per meter: explicit `price_per_kwh` > `windows` match at
 sample time > built-in `TARIFFS[country]` (approximate retail averages, early
 2026) > FR fallback. Remote targets can declare their own `country`: energy is
@@ -93,8 +101,9 @@ resolved rate, so sessions spanning HP/HC windows sum correctly.
 ## Use
 
 - **`power_cost` tool**: ask the model, or call it directly. Args: `scope` =
-  `session` (default) | `today` | `all`. Shows watts per meter, kWh (raw and
-  attributed), cost, active rate, baseline warm-up, and probe statuses.
+  `session` (default) | `today` | `all`, `format` = `text` (default) | `json`.
+  Shows watts per meter, kWh (raw and attributed), cost, active rate, baseline
+  warm-up, daily budget, and probe statuses.
 - **Toast**: when a session ends having consumed more than 1 Wh, a TUI toast
   shows the session's kWh and cost.
 - **State**: `$XDG_DATA_HOME/opencode-watt/state.json` (default
