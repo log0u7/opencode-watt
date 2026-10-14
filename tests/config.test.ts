@@ -46,6 +46,14 @@ describe("normalizeConfig()", () => {
     expect(normalizeConfig(undefined).meters).toBeNull();
   });
 
+  it("clamps the wall factor into [1, 2]", () => {
+    expect(normalizeConfig({ wall_factor: 1.15 }).wall_factor).toBeCloseTo(1.15, 6);
+    expect(normalizeConfig({ wall_factor: 3 }).wall_factor).toBe(2);
+    expect(normalizeConfig({ wall_factor: 0.5 }).wall_factor).toBe(1);
+    expect(normalizeConfig({ wall_factor: "big" }).wall_factor).toBe(1);
+    expect(normalizeConfig(undefined).wall_factor).toBe(1);
+  });
+
   it("replaces invalid values with defaults", () => {
     const cfg = normalizeConfig({
       interval_ms: -5,

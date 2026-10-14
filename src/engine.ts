@@ -159,12 +159,12 @@ export function createEngine(
       const share = busy.size > 0 ? 1 / busy.size : 0;
       for (const [source, ps] of Object.entries(res.per_source)) {
         const rate = rateFor(source, new Date(now));
-        day.cost += cost(ps.attributed_j, rate);
+        day.cost += cost(ps.attributed_j, rate, cfg.wall_factor);
         for (const sessionID of busy) {
           const entry = ensureEntry(sessionID);
           entry.raw_j += ps.raw_j * share;
           entry.attributed_j += ps.attributed_j * share;
-          entry.cost += cost(ps.attributed_j * share, rate);
+          entry.cost += cost(ps.attributed_j * share, rate, cfg.wall_factor);
         }
       }
       // Daily budget: warn once per day, exactly when the threshold is crossed.

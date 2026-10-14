@@ -68,6 +68,7 @@ All options are optional; pass them in the plugin tuple:
         }
       ],
       "meters": null,
+      "wall_factor": 1,
       "daily_budget_kwh": null
     ]
   }
@@ -87,6 +88,10 @@ it (`"meters": ["rocm-smi"]` keeps one). Default `null`: every available meter.
 
 `daily_budget_kwh` triggers a TUI toast once per day as soon as attributed
 energy for the day crosses the threshold. Default `null`: no budget.
+
+`wall_factor` prices the wall draw on top of measured energy (PSU losses and
+friends), clamped to [1, 2]: the kWh stays measured, only the money scales.
+Default `1`: price the kWh as measured.
 
 `power_cost` takes a `format` argument: `text` (default) or `json` (the same
 report as structured data: meters, rate, baseline, session/day/totals, probe
@@ -133,6 +138,11 @@ machine.
 
 Sampling backs off exponentially (up to 60 s) while no meter reports `ok`, so a
 machine without any readable meter costs almost nothing to watch.
+
+The state file assumes a single writer per machine: run one OpenCode instance
+per host (its `state.json` path follows `XDG_DATA_HOME`, so different machines
+are separate by construction). Two instances on the same host would both sample
+the same meters and overwrite each other's totals.
 
 ## Development
 

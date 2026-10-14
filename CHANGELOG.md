@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default stays human-readable text.
 - `daily_budget_kwh` option: a TUI toast warns once per day when attributed
   energy crosses the configured threshold.
+- `wall_factor` option (default 1, clamped to [1, 2]): prices the wall draw on
+  top of measured energy (PSU losses and friends); the kWh stays measured, only
+  the money is scaled.
+- README documents the single-writer assumption for `state.json` (one OpenCode
+  instance per machine).
+- Biome configuration migrated to the 2.5.x schema (silences a warning on
+  every CI run).
 
 ### Changed
 

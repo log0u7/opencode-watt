@@ -142,6 +142,8 @@ export function resolveRate(
   return { price_per_kwh: tablePrice, currency: tableCurrency, label: country };
 }
 
-export function cost(joules: number, rate: Rate): number {
-  return (joules * rate.price_per_kwh) / 3_600_000;
+// `wallFactor` prices the wall draw (PSU losses and friends) on top of the
+// measured energy: the kWh stays measured, only the money is scaled.
+export function cost(joules: number, rate: Rate, wallFactor = 1): number {
+  return (joules * rate.price_per_kwh * wallFactor) / 3_600_000;
 }

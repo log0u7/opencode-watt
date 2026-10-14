@@ -11,6 +11,7 @@ export type WattConfig = {
   price_per_kwh: number | null;
   currency: string | null;
   meters: string[] | null;
+  wall_factor: number;
   daily_budget_kwh: number | null;
   windows: RateWindow[];
   ssh: SshTarget[];
@@ -75,6 +76,7 @@ export function normalizeConfig(raw: unknown): WattConfig {
         : null,
     currency: str(r.currency),
     meters: strList(r.meters),
+    wall_factor: Math.min(num(r.wall_factor, 1, 1), 2),
     daily_budget_kwh: num(r.daily_budget_kwh, 0, 0) || null,
     windows,
     ssh,

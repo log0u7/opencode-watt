@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dayKey, loadState, saveState, type State } from "../src/store.js";
+import { dayKey, loadState, saveState, statePath, type State } from "../src/store.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -34,6 +34,32 @@ afterEach(() => {
 describe("dayKey()", () => {
   it("formats a local YYYY-MM-DD key", () => {
     expect(dayKey(new Date("2026-09-28T20:00:00Z"))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("statePath()", () => {
+  const OLD = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...OLD };
+  });
+
+  it("uses the explicit data home when given", () => {
+    expect(statePath("/data")).toBe("/data/opencode-watt/state.json");
+  });
+
+  it("prefers XDG_DATA_HOME over HOME", () => {
+    process.env.XDG_DATA_HOME = "/xdg";
+    process.env.HOME = "/home/u";
+    expect(statePath()).toBe("/xdg/opencode-watt/state.json");
+  });
+
+  it("falls back to HOME and tolerates a missing HOME", () => {
+    delete process.env.XDG_DATA_HOME;
+    process.env.HOME = "/home/u";
+    expect(statePath()).toBe("/home/u/.local/share/opencode-watt/state.json");
+    delete process.env.HOME;
+    expect(statePath()).toBe("/.local/share/opencode-watt/state.json");
   });
 });
 
