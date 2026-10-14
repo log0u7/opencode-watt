@@ -25,10 +25,19 @@ const bool = (v: unknown, def: boolean): boolean => (typeof v === "boolean" ? v 
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
+const intervalMs = (v: unknown, def: number, min: number): number =>
+  typeof v === "number" && Number.isFinite(v) ? (v > 0 ? Math.max(v, min) : def) : def;
+
+const country = (v: unknown): string | null =>
+  typeof v === "string" && /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : null;
+
 const strList = (v: unknown): string[] | null => {
   if (!Array.isArray(v)) return null;
-  const kept = v.filter((s): s is string => typeof s === "string" && s.length > 0);
-  return kept.length > 0 ? kept : null;
+  const kept = v
+    .filter((s): s is string => typeof s === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return kept.length > 0 ? [...new Set(kept)] : null;
 };
 
 const hhMm = (v: unknown): v is string =>
@@ -40,19 +49,32 @@ const validWindow = (w: unknown): w is RateWindow =>
   hhMm((w as RateWindow).start) &&
   hhMm((w as RateWindow).end) &&
   typeof (w as RateWindow).price_per_kwh === "number" &&
-  Number.isFinite((w as RateWindow).price_per_kwh);
+  Number.isFinite((w as RateWindow).price_per_kwh) &&
+  (w as RateWindow).price_per_kwh >= 0;
+
+const safeHost = (host: string): boolean =>
+  host.length > 0 && !host.startsWith("-") && !/\s/.test(host);
 
 const validSsh = (t: unknown): t is SshTarget =>
   typeof t === "object" &&
   t !== null &&
   typeof (t as SshTarget).host === "string" &&
-  (t as SshTarget).host.length > 0;
+  safeHost((t as SshTarget).host);
+
+const httpUrl = (v: unknown): boolean => {
+  if (typeof v !== "string") return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
 
 const validProm = (t: unknown): t is PromTarget =>
   typeof t === "object" &&
   t !== null &&
-  typeof (t as PromTarget).base_url === "string" &&
-  (t as PromTarget).base_url.length > 0 &&
+  httpUrl((t as PromTarget).base_url) &&
   Array.isArray((t as PromTarget).queries) &&
   ((t as PromTarget).queries as PromTarget["queries"]).every(
     (q) => typeof q?.name === "string" && typeof q?.query === "string",
@@ -64,12 +86,12 @@ export function normalizeConfig(raw: unknown): WattConfig {
   const ssh = Array.isArray(r.ssh) ? r.ssh.filter(validSsh) : [];
   const prom = Array.isArray(r.prom) ? r.prom.filter(validProm) : [];
   return {
-    interval_ms: num(r.interval_ms, 1000, 200),
+    interval_ms: intervalMs(r.interval_ms, 1000, 200),
     idle_interval_ms: num(r.idle_interval_ms, 10000, 1000),
     tail_ms: num(r.tail_ms, 5000, 0),
     subtract_idle: bool(r.subtract_idle, true),
     ssh_control: bool(r.ssh_control, true),
-    country: str(r.country),
+    country: country(r.country),
     price_per_kwh:
       typeof r.price_per_kwh === "number" && Number.isFinite(r.price_per_kwh) && r.price_per_kwh > 0
         ? r.price_per_kwh

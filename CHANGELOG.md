@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero instead of a spurious ~92% of the range.
 - Sampler: `lastWatts()` now preserves meter sources that contain a colon
   (e.g. `prom@vm:8428`) instead of truncating them.
+- Config: an `ssh` target whose `host` started with `-` (or contained
+  whitespace) could inject extra arguments into the `ssh` command line; such
+  targets are now dropped.
+- Config: a `prom` target now requires an `http`/`https` `base_url`; other
+  schemes (and unparseable URLs) are dropped.
+- Config: a rate window with a negative `price_per_kwh` is dropped instead of
+  producing a negative tariff.
+- Config: `country` is normalized to an upper-case ISO alpha-2 code (or `null`
+  when it is not two ASCII letters), `meters` are trimmed and deduplicated, and
+  a numeric `interval_ms` below the floor is clamped up instead of being reset
+  to the default.
 
 ## [0.2.0] - 2026-10-14
 
