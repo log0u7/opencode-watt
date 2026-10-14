@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when it is not two ASCII letters), `meters` are trimmed and deduplicated, and
   a numeric `interval_ms` below the floor is clamped up instead of being reset
   to the default.
+- Reports: `reportData` now exposes the distinct source currencies
+  (`currencies`) and the text report warns `currencies: EUR, USD (totals mix
+  currencies)` when targets resolve to more than one currency, instead of
+  silently presenting a mixed sum under the default currency.
 
 ## [0.2.0] - 2026-10-14
 
