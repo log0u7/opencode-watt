@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retrying (or not) unconditionally.
 - Probes: a hwmon listing that failed once no longer froze the probe as
   permanently absent; the listing is retried until it succeeds.
+- Sessions: a provider `retry` status (429/5xx backoff) is now treated as busy,
+  so the turn keeps receiving energy instead of losing its imputation and tail.
+- SSH: the documented per-target `control_master` option is now honored instead
+  of being overwritten by the global `ssh_control`.
+- Prometheus: two targets on the same host no longer collide on one source; the
+  source now includes the port and path (`prom@host:port/path`).
 - Sampler: a backwards clock step (or two readings sharing a timestamp) no
   longer produces a `delta / 1e-9` energy spike that poisoned the idle baseline;
   the interval is skipped and resynced.

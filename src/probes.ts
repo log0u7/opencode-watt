@@ -582,7 +582,10 @@ export function promProbe(
   const base = target.base_url.replace(/\/+$/, "");
   let hostPart = base;
   try {
-    hostPart = new URL(base).host;
+    const u = new URL(base);
+    // Include the path so two targets on the same host (different prefixes or
+    // ports) get distinct sources instead of colliding on the host alone.
+    hostPart = u.pathname === "/" ? u.host : `${u.host}${u.pathname}`;
   } catch {
     // keep raw base as fallback
   }

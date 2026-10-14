@@ -117,6 +117,11 @@ const idleStatusEvent = (sessionID: string): TestEvent => ({
   data: { sessionID, status: { type: "idle" } },
 });
 
+const retryStatusEvent = (sessionID: string): TestEvent => ({
+  type: "session.status",
+  data: { sessionID, status: { type: "retry" } },
+});
+
 const idleEvent = (sessionID: string): TestEvent => ({ type: "session.idle", data: { sessionID } });
 
 const deletedEvent = (sessionID: string): TestEvent => ({
@@ -184,6 +189,29 @@ describe("opencode-watt v2 setup", () => {
       .mock.calls.map((call) => String(call[0]))
       .join("\n");
     expect(logged).toContain("kWh");
+    expect(logged).toContain("this session");
+
+    await cleanup?.();
+  });
+
+  it("keeps imputing across a provider retry (busy -> retry -> idle)", async () => {
+    const statePath = tmpStatePath();
+    const { ctx, push } = fakeCtx(statePath, [powerProbe("s", 40000)]);
+
+    const cleanup = await pluginModule.setup(ctx);
+
+    await push(busyEvent("s1"));
+    await sleep(600);
+    await push(retryStatusEvent("s1"));
+    await sleep(600); // accrual must continue during the retry
+    await push(idleStatusEvent("s1"));
+    await push(idleEvent("s1"));
+    await sleep(150);
+
+    const logged = vi
+      .mocked(console.info)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
     expect(logged).toContain("this session");
 
     await cleanup?.();
