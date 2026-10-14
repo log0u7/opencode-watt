@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- DRAM energy via the RAPL `dram` subzone (`intel-rapl:*:dram`), reported as a
+  separate meter: on long contexts the KV cache moves most of the energy.
+- `meters` option: allowlist of source prefixes, to keep a single GPU meter on
+  hosts where two meters report the same device (AMD: `rocm-smi` + amdgpu
+  hwmon).
+
+### Changed
+
+- Idle baseline is now the median of the idle-rate window instead of the mean:
+  one idle tick polluted by another process (compile, app launch) no longer
+  inflates the baseline and under-states the session cost.
+
 ## [0.1.1] - 2026-10-14
 
 ### Fixed

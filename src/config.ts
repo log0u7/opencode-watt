@@ -10,6 +10,7 @@ export type WattConfig = {
   country: string | null;
   price_per_kwh: number | null;
   currency: string | null;
+  meters: string[] | null;
   windows: RateWindow[];
   ssh: SshTarget[];
   prom: PromTarget[];
@@ -21,6 +22,12 @@ const num = (v: unknown, def: number, min: number): number =>
 const bool = (v: unknown, def: boolean): boolean => (typeof v === "boolean" ? v : def);
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+
+const strList = (v: unknown): string[] | null => {
+  if (!Array.isArray(v)) return null;
+  const kept = v.filter((s): s is string => typeof s === "string" && s.length > 0);
+  return kept.length > 0 ? kept : null;
+};
 
 const hhMm = (v: unknown): v is string =>
   typeof v === "string" && /^([01]?\d|2[0-3]):([0-5]\d)$/.test(v);
@@ -66,6 +73,7 @@ export function normalizeConfig(raw: unknown): WattConfig {
         ? r.price_per_kwh
         : null,
     currency: str(r.currency),
+    meters: strList(r.meters),
     windows,
     ssh,
     prom,

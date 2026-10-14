@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeConfig } from "../src/config.js";
-import { createEngine, type EngineHost } from "../src/engine.js";
+import { buildProbes, createEngine, type EngineHost } from "../src/engine.js";
 import type { Probe, ProbeResult } from "../src/probes.js";
 import { dayKey } from "../src/store.js";
 
@@ -38,6 +38,34 @@ const powerProbe = (source: string, watts: number, delayMs = 0): Probe => ({
 
 const busyCfg = (extra: Record<string, unknown> = {}) =>
   normalizeConfig({ interval_ms: 250, tail_ms: 0, subtract_idle: false, ...extra });
+
+describe("buildProbes() meters filter", () => {
+  it("keeps every local source by default", () => {
+    const { probes } = buildProbes(normalizeConfig({}));
+    const sources = probes.map((p) => p.source);
+    expect(sources).toContain("nvidia-smi@local");
+    expect(sources).toContain("rocm-smi@local");
+    expect(sources).toContain("rapl@local");
+    expect(sources).toContain("hwmon@local");
+  });
+
+  it("keeps only the sources matching the configured prefixes", () => {
+    const { probes, countries } = buildProbes(
+      normalizeConfig({ meters: ["nvidia-smi"], ssh: [{ host: "box" }] }),
+    );
+    // The prefix applies to every target, local and remote alike.
+    expect(probes.map((p) => p.source)).toEqual(["nvidia-smi@local", "nvidia-smi@box"]);
+    expect(countries.get("nvidia-smi@box")).toBeNull();
+  });
+
+  it("keeps remote prefixes including their country mapping", () => {
+    const { probes, countries } = buildProbes(
+      normalizeConfig({ meters: ["nvidia-smi"], ssh: [{ host: "box", country: "FR" }] }),
+    );
+    expect(probes.map((p) => p.source)).toContain("nvidia-smi@box");
+    expect(countries.get("nvidia-smi@box")).toBe("FR");
+  });
+});
 
 describe("createEngine() tick isolation", () => {
   beforeEach(() => {

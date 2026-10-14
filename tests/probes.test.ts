@@ -175,11 +175,11 @@ describe("raplProbes()", () => {
   it("reads the zone metadata once and only the counter afterwards", async () => {
     const read = vi.fn(readFn);
     const probes = raplProbes(listFn, read as unknown as ReadFn, "local");
-    await probes[0].sample(1); // max + energy_uj
-    expect(read).toHaveBeenCalledTimes(2);
+    await probes[0].sample(1); // subzone name + max + energy_uj
+    expect(read).toHaveBeenCalledTimes(3);
 
     await probes[0].sample(2); // energy_uj only
-    expect(read).toHaveBeenCalledTimes(3);
+    expect(read).toHaveBeenCalledTimes(4);
   });
 
   it("marks denied on EACCES and stops reading", async () => {
@@ -196,7 +196,7 @@ describe("raplProbes()", () => {
     expect(first.samples).toEqual([]);
     const second = await probes[0].sample(2);
     expect(second.status).toBe("denied");
-    expect(reads).toHaveBeenCalledTimes(2); // max + the denied energy read, then dead
+    expect(reads).toHaveBeenCalledTimes(3); // subzone name + max + the denied energy read
   });
 
   it("marks denied when the zone listing is denied", async () => {
@@ -224,6 +224,66 @@ describe("raplProbes()", () => {
     const res = await probes[0].sample(1);
     expect(res.status).toBe("absent"); // no sample could be built
     expect(res.samples).toEqual([]);
+  });
+
+  it("emits the dram subzone alongside the package zone", async () => {
+    const files: Record<string, string> = {
+      "/sys/class/powercap": "intel-rapl:0\nintel-rapl:0:0\nintel-rapl:0:2\n",
+      "/sys/class/powercap/intel-rapl:0/name": "package-0\n",
+      "/sys/class/powercap/intel-rapl:0/energy_uj": "1000000\n",
+      "/sys/class/powercap/intel-rapl:0/max_energy_range_uj": "262143328850\n",
+      "/sys/class/powercap/intel-rapl:0:0/name": "core\n",
+      "/sys/class/powercap/intel-rapl:0:2/name": "dram\n",
+      "/sys/class/powercap/intel-rapl:0:2/energy_uj": "250000\n",
+      "/sys/class/powercap/intel-rapl:0:2/max_energy_range_uj": "3000000\n",
+    };
+    const read: ReadFn = (p) => {
+      const c = files[p];
+      if (c === undefined) throw new Error("missing");
+      return c;
+    };
+    const list: ListFn = (p) => (files[p] ?? "").trim().split("\n").filter(Boolean);
+
+    const probes = raplProbes(list, read, "local");
+    const res = await probes[0].sample(1);
+    expect(res.status).toBe("ok");
+    expect(res.samples).toEqual([
+      {
+        kind: "energy",
+        source: "rapl@local",
+        id: "intel-rapl:0",
+        joules: 1,
+        wrap_max_j: 262143.32885,
+        at: 1,
+      },
+      {
+        kind: "energy",
+        source: "rapl@local",
+        id: "intel-rapl:0:dram",
+        joules: 0.25,
+        wrap_max_j: 3,
+        at: 1,
+      },
+    ]);
+  });
+
+  it("drops a subzone whose name cannot be read", async () => {
+    const files: Record<string, string> = {
+      "/sys/class/powercap": "intel-rapl:0\nintel-rapl:0:0\n",
+      "/sys/class/powercap/intel-rapl:0/name": "package-0\n",
+      "/sys/class/powercap/intel-rapl:0/energy_uj": "1000000\n",
+      "/sys/class/powercap/intel-rapl:0/max_energy_range_uj": "262143328850\n",
+    };
+    const read: ReadFn = (p) => {
+      const c = files[p];
+      if (c === undefined) throw new Error("missing");
+      return c;
+    };
+    const list: ListFn = (p) => (files[p] ?? "").trim().split("\n").filter(Boolean);
+
+    const probes = raplProbes(list, read, "local");
+    const res = await probes[0].sample(1);
+    expect(res.samples.map((s) => s.id)).toEqual(["intel-rapl:0"]);
   });
 
   it("maps an unexpected counter error to status error", async () => {

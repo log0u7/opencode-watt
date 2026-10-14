@@ -47,6 +47,17 @@ export function buildProbes(cfg: WattConfig): {
     probes.push(p);
     countries.set(p.source, target.country ?? null);
   }
+  // Optional allowlist of source prefixes: lets a host keep a single GPU meter
+  // when two of them report the same device (e.g. rocm-smi and amdgpu hwmon).
+  const wanted = cfg.meters;
+  if (wanted) {
+    const kept = probes.filter((p) => wanted.some((m) => p.source.startsWith(m)));
+    probes.length = 0;
+    probes.push(...kept);
+    for (const source of countries.keys()) {
+      if (!kept.some((p) => p.source === source)) countries.delete(source);
+    }
+  }
   return { probes, countries };
 }
 
