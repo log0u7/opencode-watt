@@ -61,6 +61,13 @@ describe("EnergyIntegrator", () => {
     expect(t0.raw_j).toBe(0);
   });
 
+  it("falls back to the tick time for a sample stamped with NaN", () => {
+    const itg = new EnergyIntegrator({ subtract_idle: false });
+    itg.tick([power("g", 10, 0)], 0);
+    const t1 = itg.tick([power("g", 20, Number.NaN)], 1000);
+    expect(t1.raw_j).toBeCloseTo(15, 6); // (10+20)/2 * 1 s
+  });
+
   it("skipped ticks still accrue the full counter delta", () => {
     const itg = new EnergyIntegrator({ subtract_idle: false });
     itg.tick([energy("c", 100, 0)], 0);
@@ -89,11 +96,13 @@ describe("EnergyIntegrator", () => {
       expect(busy.raw_j).toBeGreaterThan(0);
     });
 
-    it("does not subtract when no baseline exists yet", () => {
+    it("seeds the baseline on the first derivable rate", () => {
       const itg = new EnergyIntegrator({ subtract_idle: true });
-      itg.tick([power("g", 50, 0)], 0, 1);
-      const busy = itg.tick([power("g", 50, 1000)], 1000, 1);
-      expect(busy.attributed_j).toBeCloseTo(busy.raw_j, 6);
+      itg.tick([power("g", 50, 0)], 0, 1); // first sighting: no rate yet
+      itg.tick([power("g", 50, 1000)], 1000, 1); // seeds a 50 W baseline
+      const busy = itg.tick([power("g", 500, 2000)], 2000, 1);
+      expect(busy.raw_j).toBeCloseTo(275, 6); // (50+500)/2 * 1 s
+      expect(busy.attributed_j).toBeCloseTo(275 - 50, 6);
     });
 
     it("subtracts counter-derived rates too", () => {

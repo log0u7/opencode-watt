@@ -55,6 +55,9 @@ const statusEvent = (sessionID: string, type: "busy" | "idle") =>
 const idleEvent = (sessionID: string) =>
   ({ event: { type: "session.idle", properties: { sessionID } } }) as never;
 
+const deletedEvent = (sessionID: string) =>
+  ({ event: { type: "session.deleted", properties: { info: { id: sessionID } } } }) as never;
+
 function baseOpts(statePath: string, probes: Probe[]): Partial<WattPluginOptions> {
   return {
     interval_ms: 250,
@@ -154,6 +157,20 @@ describe("WattPlugin", () => {
       )) as string;
       expect(out).toContain("0.0050 kWh");
     }
+  });
+
+  it("drops a deleted session from the busy set and from state", async () => {
+    const statePath = tmpStatePath();
+    const hooks = await WattPlugin(fakeInput(), baseOpts(statePath, [powerProbe("s", 40000)]));
+    await hooks.event?.(statusEvent("s1", "busy"));
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(250);
+
+    await hooks.event?.(deletedEvent("s1"));
+    await vi.advanceTimersByTimeAsync(250);
+
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as State;
+    expect(state.sessions.s1).toBeUndefined();
   });
 
   it("answers 'no meters' when nothing is available", async () => {

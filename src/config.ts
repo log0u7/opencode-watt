@@ -6,6 +6,7 @@ export type WattConfig = {
   idle_interval_ms: number;
   tail_ms: number;
   subtract_idle: boolean;
+  ssh_control: boolean;
   country: string | null;
   price_per_kwh: number | null;
   currency: string | null;
@@ -58,6 +59,7 @@ export function normalizeConfig(raw: unknown): WattConfig {
     idle_interval_ms: num(r.idle_interval_ms, 10000, 1000),
     tail_ms: num(r.tail_ms, 5000, 0),
     subtract_idle: bool(r.subtract_idle, true),
+    ssh_control: bool(r.ssh_control, true),
     country: str(r.country),
     price_per_kwh:
       typeof r.price_per_kwh === "number" && Number.isFinite(r.price_per_kwh) && r.price_per_kwh > 0

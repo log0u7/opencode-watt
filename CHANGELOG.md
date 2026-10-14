@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A single failing meter no longer discards the whole sampling tick: a probe that
+  throws now reports `error` for that tick while the other meters keep accruing
+  energy (the previous `Promise.all` dropped every reading of the tick).
+- Deleted sessions are removed from the busy set (`session.deleted`), so an
+  abandoned session can no longer absorb energy or dilute the split across the
+  sessions that are still running.
+- Sampling spans are measured between the readings themselves, not between tick
+  starts: a slow `nvidia-smi` spawn no longer shrinks the integrated interval.
+- The idle baseline is seeded by the first derivable rate, so a session that
+  starts while the host is already busy is no longer charged the whole machine
+  until the first idle tick.
+
+### Changed
+
+- sysfs reads are non-blocking (`node:fs/promises`) instead of `readFileSync` on
+  the OpenCode server event loop.
+- RAPL zone names and wrap limits are resolved once, and the hwmon directory is
+  resolved until its power files are known (then re-checked every 60 s): a host
+  with 11 hwmon chips and no power sensor goes from 44 failed reads per tick to
+  none.
+- SSH probes pass `-n -o BatchMode=yes` (a passphrase prompt can no longer block
+  a tick for the whole timeout) and reuse one connection via `ControlMaster`;
+  `ssh_control` (default `true`) disables the reuse, per target via
+  `control_master: false`.
+- Sampling backs off exponentially up to 60 s while no meter reports `ok`, so a
+  machine with no readable meter stops paying for probes that return nothing.
+- Meter formats now have a single implementation shared by the local and the SSH
+  probes (`nvidiaSamples`, `rocmSamples`, `raplSamples`, `hwmonSamples`,
+  `promValues`); the Prometheus parser reads the response body directly instead
+  of re-serialising it.
+- `power_cost` reports the idle baseline warm-up (`baseline: 3/30 samples`).
+
 ## [0.1.0] - 2026-10-12
 
 ### Added

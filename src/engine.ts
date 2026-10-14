@@ -3,6 +3,7 @@ import { cost, resolveRate } from "./pricing.js";
 import {
   hwmonProbes,
   type Probe,
+  type ProbeStatus,
   raplProbes,
   type Sample,
   nvidiaSmiProbe,
@@ -20,6 +21,7 @@ export const WH_TO_J = 3600;
 export const JOULES_PER_KWH = 3_600_000;
 const SAVE_INTERVAL_MS = 60_000;
 const EXEC_TIMEOUT_MS = 5000;
+const MAX_MISS_STREAK = 6; // 2**6 = 64x the configured interval
 
 export const kwh = (joules: number): string => (joules / JOULES_PER_KWH).toFixed(4);
 
@@ -35,7 +37,7 @@ export function buildProbes(cfg: WattConfig): {
   probes.push(...hwmonProbes(nodeList, nodeRead, "local"));
   const countries = new Map<string, string | null>();
   for (const target of cfg.ssh) {
-    for (const p of sshProbes(nodeExec, target)) {
+    for (const p of sshProbes(nodeExec, { ...target, control_master: cfg.ssh_control })) {
       probes.push(p);
       countries.set(p.source, target.country ?? null);
     }
@@ -77,6 +79,7 @@ export function createEngine(
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastSave = 0;
+  let misses = 0;
 
   const log = host.log;
 
@@ -107,13 +110,34 @@ export function createEngine(
   const tick = async (): Promise<void> => {
     if (disposed) return;
     try {
-      const now = Date.now();
-      const results = await Promise.all(probes.map(async (p) => ({ p, r: await p.sample(now) })));
+      const started = Date.now();
+      // Each probe is stamped when its own reading lands, so a slow meter
+      // (nvidia-smi spawns a process) shifts only its own integration span.
+      // A probe that throws is isolated: it reports "error" for this tick
+      // instead of dropping every other meter.
+      const settled = await Promise.all(
+        probes.map(async (p) => {
+          try {
+            const result = await p.sample(started);
+            return { source: p.source, result, at: Date.now() };
+          } catch {
+            return {
+              source: p.source,
+              result: { samples: [], status: "error" as ProbeStatus },
+              at: Date.now(),
+            };
+          }
+        }),
+      );
       const samples: Sample[] = [];
-      for (const { p, r } of results) {
-        samples.push(...r.samples);
-        state.probe_status[p.source] = r.status;
+      for (const { source, result, at } of settled) {
+        state.probe_status[source] = result.status;
+        for (const s of result.samples) samples.push({ ...s, at });
       }
+      const now = started;
+      const meterOk = settled.some(({ result }) => result.status === "ok");
+      if (!meterOk && samples.length === 0) misses++;
+      else misses = 0;
       const res = integrator.tick(samples, now, busy.size);
       const dk = dayKey(new Date(now));
       const existing = state.days[dk];
@@ -141,16 +165,13 @@ export function createEngine(
 
   const schedule = (override?: number): void => {
     if (disposed) return;
-    const delay =
-      override ??
-      (busy.size > 0
-        ? cfg.interval_ms
-        : Date.now() < tailUntil
-          ? cfg.tail_ms
-          : cfg.idle_interval_ms);
+    const base =
+      busy.size > 0 ? cfg.interval_ms : Date.now() < tailUntil ? cfg.tail_ms : cfg.idle_interval_ms;
+    // No meter reports ok: stop burning CPU on probes that report nothing.
+    const backoff = Math.min(base * 2 ** Math.min(misses, MAX_MISS_STREAK), 60_000);
     timer = setTimeout(() => {
       void tick();
-    }, delay);
+    }, override ?? backoff);
   };
 
   schedule(0);
@@ -166,6 +187,15 @@ export function createEngine(
       if (entry) entry.last_active = Date.now();
       if (busy.size === 0) tailUntil = Date.now() + cfg.tail_ms;
     }
+  };
+
+  // A deleted session must never stay in the busy set: it would keep
+  // receiving energy and dilute the split across the real sessions.
+  const forget = (sessionID: string): void => {
+    busy.delete(sessionID);
+    delete state.sessions[sessionID];
+    if (busy.size === 0) tailUntil = Date.now() + cfg.tail_ms;
+    persist(true);
   };
 
   const handleIdle = async (sessionID: string): Promise<void> => {
@@ -207,6 +237,10 @@ export function createEngine(
     lines.push(
       `rate: ${rate.price_per_kwh.toFixed(4)} ${rate.currency}/kWh (${rate.label}${cfg.subtract_idle ? ", idle subtracted" : ""})`,
     );
+    if (cfg.subtract_idle && probes.length > 0) {
+      const { filled, window } = integrator.baselineProgress();
+      lines.push(`baseline: ${filled}/${window} samples`);
+    }
 
     const sessionEntry = state.sessions[sessionID];
     if (scope === "session") {
@@ -250,5 +284,5 @@ export function createEngine(
     persist(true);
   };
 
-  return { state, handleStatus, handleIdle, setModel, report, dispose };
+  return { state, handleStatus, handleIdle, forget, setModel, report, dispose };
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -117,6 +117,11 @@ const idleStatusEvent = (sessionID: string): TestEvent => ({
 
 const idleEvent = (sessionID: string): TestEvent => ({ type: "session.idle", data: { sessionID } });
 
+const deletedEvent = (sessionID: string): TestEvent => ({
+  type: "session.deleted",
+  data: { sessionID },
+});
+
 describe("opencode-watt v2 setup", () => {
   beforeEach(() => {
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -187,6 +192,25 @@ describe("opencode-watt v2 setup", () => {
     await sleep(80);
 
     expect(existsSync(statePath)).toBe(true);
+    await cleanup?.();
+  });
+
+  it("drops a deleted session from the busy set and from state", async () => {
+    const statePath = tmpStatePath();
+    const { ctx, push } = fakeCtx(statePath, [powerProbe("s", 40000)]);
+
+    const cleanup = await pluginModule.setup(ctx);
+
+    await push(busyEvent("s1"));
+    await sleep(600);
+    await push(deletedEvent("s1"));
+    await sleep(150);
+
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as {
+      sessions: Record<string, unknown>;
+    };
+    expect(state.sessions.s1).toBeUndefined();
+
     await cleanup?.();
   });
 });

@@ -56,6 +56,8 @@ export const WattPlugin: Plugin = async (input, rawOptions) => {
           engine.handleStatus(sessionID, status.type);
         } else if (event.type === "session.idle") {
           await engine.handleIdle(event.properties.sessionID);
+        } else if (event.type === "session.deleted") {
+          engine.forget(event.properties.info.id);
         }
       } catch (error) {
         try {

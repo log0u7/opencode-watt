@@ -1,10 +1,11 @@
 import { execFile as nodeExecFile } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 export type ExecResult = { ok: true; stdout: string } | { ok: false; code: string };
 export type ExecFn = (file: string, args: string[], timeoutMs: number) => Promise<ExecResult>;
-export type ReadFn = (path: string) => string;
-export type ListFn = (path: string) => string[];
+export type ReadFn = (path: string) => string | Promise<string>;
+export type ListFn = (path: string) => string[] | Promise<string[]>;
 
 export type ProbeStatus = "ok" | "absent" | "denied" | "unreachable" | "error";
 
@@ -22,8 +23,8 @@ export type Sample = PowerSample | EnergySample;
 export type Probe = { source: string; sample: (now: number) => Promise<ProbeResult> };
 export type ProbeResult = { samples: Sample[]; status: ProbeStatus };
 
-// Default node implementations (injectable for tests).
-
+// Default node implementations (injectable for tests). Async on purpose: the
+// sampling loop runs inside the OpenCode server event loop.
 export function nodeExec(file: string, args: string[], timeoutMs: number): Promise<ExecResult> {
   return new Promise((resolve) => {
     nodeExecFile(file, args, { timeout: timeoutMs }, (error, stdout) => {
@@ -42,8 +43,8 @@ export function nodeExec(file: string, args: string[], timeoutMs: number): Promi
   });
 }
 
-export const nodeRead: ReadFn = (path) => readFileSync(path, "utf8");
-export const nodeList: ListFn = (path) => readdirSync(path);
+export const nodeRead: ReadFn = async (path) => await readFile(path, "utf8");
+export const nodeList: ListFn = async (path) => await readdir(path);
 
 // Failure handling: transient failures (unreachable/error) retry after a short
 // backoff (first failure retries once, then every 10 ticks). Permanent ones
@@ -85,6 +86,13 @@ class Guard {
 
 const MJ = 1e6; // microjoules -> joules
 
+function statusFromFsError(error: unknown): ProbeStatus {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "EACCES" || code === "EPERM") return "denied";
+  if (code === "ENOENT") return "absent";
+  return "error";
+}
+
 // Parsers (pure, unit-testable).
 
 export function parseNvidiaCsv(stdout: string): { gpu: string; name: string; watts: number }[] {
@@ -117,36 +125,39 @@ export function parseRocmJson(stdout: string): { gpu: string; watts: number }[] 
   }
 }
 
+export function promValues(body: unknown): number[] {
+  const parsed = body as {
+    status?: string;
+    data?: { result?: { value?: [number, string] }[] };
+  };
+  if (parsed?.status !== "success") return [];
+  const out: number[] = [];
+  for (const r of parsed.data?.result ?? []) {
+    const raw = r?.value?.[1];
+    const v = raw === undefined ? Number.NaN : Number(raw);
+    if (Number.isFinite(v)) out.push(v);
+  }
+  return out;
+}
+
 export function parsePromResponse(body: string): number[] {
   try {
-    const parsed = JSON.parse(body) as {
-      status?: string;
-      data?: { result?: { value?: [number, string] }[] };
-    };
-    if (parsed.status !== "success") return [];
-    const out: number[] = [];
-    for (const r of parsed.data?.result ?? []) {
-      const raw = r.value?.[1];
-      const v = raw === undefined ? Number.NaN : Number(raw);
-      if (Number.isFinite(v)) out.push(v);
-    }
-    return out;
+    return promValues(JSON.parse(body));
   } catch {
     return [];
   }
 }
 
-export function parseRaplText(
-  text: string,
-): { path: string; name: string | null; uj: number | null; max_uj: number | null }[] {
-  const zones: { path: string; name: string | null; uj: number | null; max_uj: number | null }[] =
-    [];
-  let current: {
-    path: string;
-    name: string | null;
-    uj: number | null;
-    max_uj: number | null;
-  } | null = null;
+export type RaplZone = {
+  path: string;
+  name: string | null;
+  uj: number | null;
+  max_uj: number | null;
+};
+
+export function parseRaplText(text: string): RaplZone[] {
+  const zones: RaplZone[] = [];
+  let current: RaplZone | null = null;
   for (const line of text.split("\n")) {
     const [key, ...rest] = line.split(" ");
     const value = rest.join(" ").trim();
@@ -166,6 +177,62 @@ export function parseRaplText(
   return zones;
 }
 
+// hwmon lines as printed by the remote script: "P <chip>:<file> <microwatts>"
+export function parseHwmonLines(text: string): { id: string; microwatts: number }[] {
+  const out: { id: string; microwatts: number }[] = [];
+  for (const line of text.split("\n")) {
+    const [key, id, value] = line.trim().split(/\s+/);
+    if (key !== "P" || !id) continue;
+    const uw = Number(value);
+    if (!Number.isFinite(uw) || uw < 0) continue;
+    out.push({ id, microwatts: uw });
+  }
+  return out;
+}
+
+// Sample builders: one implementation per meter format, shared by the local
+// probes and by the SSH section probes, so a format bug is fixed in one place.
+export function nvidiaSamples(
+  source: string,
+  rows: { gpu: string; watts: number }[],
+  at: number,
+): Sample[] {
+  return rows.map((r) => ({ kind: "power", source, id: `gpu${r.gpu}`, watts: r.watts, at }));
+}
+
+export function rocmSamples(
+  source: string,
+  rows: { gpu: string; watts: number }[],
+  at: number,
+): Sample[] {
+  return rows.map((r) => ({ kind: "power", source, id: r.gpu, watts: r.watts, at }));
+}
+
+export function raplSamples(source: string, zones: RaplZone[], at: number): Sample[] {
+  const samples: Sample[] = [];
+  for (const z of zones) {
+    if (z.uj === null) continue;
+    const wrapMax = z.max_uj !== null && z.max_uj > 0 ? z.max_uj / MJ : undefined;
+    samples.push({
+      kind: "energy",
+      source,
+      id: z.path.split("/").pop() ?? z.path,
+      joules: z.uj / MJ,
+      ...(wrapMax !== undefined ? { wrap_max_j: wrapMax } : {}),
+      at,
+    });
+  }
+  return samples;
+}
+
+export function hwmonSamples(
+  source: string,
+  readings: { id: string; microwatts: number }[],
+  at: number,
+): Sample[] {
+  return readings.map((r) => ({ kind: "power", source, id: r.id, watts: r.microwatts / MJ, at }));
+}
+
 function statusFromExec(code: string): ProbeStatus {
   if (code === "ENOENT") return "absent";
   if (code === "TIMEOUT") return "unreachable";
@@ -173,15 +240,11 @@ function statusFromExec(code: string): ProbeStatus {
 }
 
 // Guarded probe factory shared by exec-backed probes.
-
 function guardedProbe(source: string, run: (now: number) => Promise<ProbeResult>): Probe {
   const guard = new Guard();
   return {
     source,
-    sample: async (now: number) => {
-      const res = await guard.run(() => run(now));
-      return res;
-    },
+    sample: async (now: number) => await guard.run(() => run(now)),
   };
 }
 
@@ -194,14 +257,7 @@ export function nvidiaSmiProbe(exec: ExecFn, target: string, timeoutMs: number):
       timeoutMs,
     );
     if (!res.ok) return { samples: [], status: statusFromExec(res.code) };
-    const samples: Sample[] = parseNvidiaCsv(res.stdout).map((r) => ({
-      kind: "power",
-      source,
-      id: `gpu${r.gpu}`,
-      watts: r.watts,
-      at: now,
-    }));
-    return { samples, status: "ok" };
+    return { samples: nvidiaSamples(source, parseNvidiaCsv(res.stdout), now), status: "ok" };
   });
 }
 
@@ -210,70 +266,70 @@ export function rocmSmiProbe(exec: ExecFn, target: string, timeoutMs: number): P
   return guardedProbe(source, async (now) => {
     const res = await exec("rocm-smi", ["--showpower", "--json"], timeoutMs);
     if (!res.ok) return { samples: [], status: statusFromExec(res.code) };
-    const samples: Sample[] = parseRocmJson(res.stdout).map((r) => ({
-      kind: "power",
-      source,
-      id: r.gpu,
-      watts: r.watts,
-      at: now,
-    }));
-    return { samples, status: "ok" };
+    return { samples: rocmSamples(source, parseRocmJson(res.stdout), now), status: "ok" };
   });
 }
 
-function joulesFromUj(uj: number): number {
-  return uj / MJ;
-}
-
+// Zone names and wrap limits never change, so they are resolved once on the
+// first sighting; only the counter is read per tick.
 export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] {
   const source = `rapl@${target}`;
   const base = "/sys/class/powercap";
-  let zones: string[];
-  try {
-    zones = list(base).filter((n) => /^intel-rapl:\d+$/.test(n));
-  } catch {
-    return [];
-  }
-  if (zones.length === 0) return [];
   const guard = new Guard(() => true); // rapl: any failure is permanent (denied/absent)
+  type Zone = { path: string; max_uj: number | null };
+  let zones: Zone[] | null = null;
+
+  // Resolves once: the zone list and the wrap limits are constant, only the
+  // counters move.
+  const resolve = async (): Promise<{ status: ProbeStatus; zones?: Zone[] }> => {
+    try {
+      const zonesFound: Zone[] = [];
+      const entries = await list(base);
+      for (const entry of entries.filter((n) => /^intel-rapl:\d+$/.test(n))) {
+        let maxUj: number | null = null;
+        try {
+          const max = Number((await read(`${base}/${entry}/max_energy_range_uj`)).trim());
+          if (Number.isFinite(max)) maxUj = max;
+        } catch {
+          // optional
+        }
+        zonesFound.push({ path: `${base}/${entry}`, max_uj: maxUj });
+      }
+      return { status: zonesFound.length > 0 ? "ok" : "absent", zones: zonesFound };
+    } catch (error) {
+      return { status: statusFromFsError(error) };
+    }
+  };
+
   return [
     {
       source,
       sample: async (now) => {
         const res = await guard.run(async () => {
-          const samples: Sample[] = [];
+          if (zones === null) {
+            const resolved = await resolve();
+            if (resolved.status !== "ok" || !resolved.zones) {
+              return { samples: [], status: resolved.status };
+            }
+            zones = resolved.zones;
+          }
+          const readings: RaplZone[] = [];
           for (const zone of zones) {
             try {
-              read(`${base}/${zone}/name`);
-              const uj = Number(read(`${base}/${zone}/energy_uj`).trim());
+              const uj = Number((await read(`${zone.path}/energy_uj`)).trim());
               if (!Number.isFinite(uj)) continue;
-              let wrapMax: number | undefined;
-              try {
-                const max = Number(read(`${base}/${zone}/max_energy_range_uj`).trim());
-                if (Number.isFinite(max) && max > 0) wrapMax = max / MJ;
-              } catch {
-                // optional
-              }
-              samples.push({
-                kind: "energy",
-                source,
-                id: zone,
-                joules: joulesFromUj(uj),
-                ...(wrapMax !== undefined ? { wrap_max_j: wrapMax } : {}),
-                at: now,
+              readings.push({
+                path: zone.path,
+                name: null,
+                uj,
+                max_uj: zone.max_uj,
               });
             } catch (error) {
-              const code = (error as NodeJS.ErrnoException).code;
-              if (code === "EACCES" || code === "EPERM") {
-                return { samples: [], status: "denied" as ProbeStatus };
-              }
-              if (code === "ENOENT") {
-                return { samples: [], status: "absent" as ProbeStatus };
-              }
-              throw error;
+              return { samples: [], status: statusFromFsError(error) };
             }
           }
-          return { samples, status: (samples.length > 0 ? "ok" : "absent") as ProbeStatus };
+          const samples = raplSamples(source, readings, now);
+          return { samples, status: samples.length > 0 ? "ok" : "absent" };
         });
         return res;
       },
@@ -281,40 +337,60 @@ export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] 
   ];
 }
 
+const HWMON_CANDIDATES = ["power1_input", "power1_average", "power2_input", "power2_average"];
+const HWMON_REFRESH_MS = 60_000;
+
+// sysfs is scanned only until the power files are known, then re-checked every
+// HWMON_REFRESH_MS: a missing file must not be re-opened on every tick.
 export function hwmonProbes(list: ListFn, read: ReadFn, target: string): Probe[] {
   const source = `hwmon@${target}`;
   const base = "/sys/class/hwmon";
-  let chips: string[];
-  try {
-    chips = list(base).filter((n) => /^hwmon\d+$/.test(n));
-  } catch {
-    return [];
-  }
-  if (chips.length === 0) return [];
-  const candidates = ["power1_input", "power1_average", "power2_input", "power2_average"];
+  let chips: string[] | null = null;
+  let paths: { id: string; path: string }[] | null = null;
+  let resolvedAt = -Infinity;
+
+  const readNumber = async (path: string): Promise<number | null> => {
+    try {
+      const value = Number((await read(path)).trim());
+      return Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  };
+
   return [
     {
       source,
       sample: async (now) => {
-        const samples: Sample[] = [];
-        for (const chip of chips) {
-          for (const file of candidates) {
-            try {
-              const uw = Number(read(`${base}/${chip}/${file}`).trim());
-              if (!Number.isFinite(uw) || uw < 0) continue;
-              samples.push({
-                kind: "power",
-                source,
-                id: `${chip}:${file}`,
-                watts: uw / MJ,
-                at: now,
-              });
-            } catch {
-              // missing file or unreadable chip: skip
+        if (chips === null) {
+          try {
+            chips = (await list(base)).filter((n) => /^hwmon\d+$/.test(n));
+          } catch {
+            chips = [];
+          }
+          paths = null;
+        }
+        if (chips.length === 0) return { samples: [], status: "absent" };
+
+        if (paths === null || now - resolvedAt > HWMON_REFRESH_MS) {
+          const found: { id: string; path: string }[] = [];
+          for (const chip of chips) {
+            for (const file of HWMON_CANDIDATES) {
+              const path = `${base}/${chip}/${file}`;
+              if ((await readNumber(path)) !== null) found.push({ id: `${chip}:${file}`, path });
             }
           }
+          paths = found;
+          resolvedAt = now;
         }
-        return { samples, status: (samples.length > 0 ? "ok" : "absent") as ProbeStatus };
+
+        const readings: { id: string; microwatts: number }[] = [];
+        for (const p of paths) {
+          const uw = await readNumber(p.path);
+          if (uw !== null && uw >= 0) readings.push({ id: p.id, microwatts: uw });
+        }
+        const samples = hwmonSamples(source, readings, now);
+        return { samples, status: samples.length > 0 ? "ok" : "absent" };
       },
     },
   ];
@@ -345,6 +421,10 @@ const HWMON_SCRIPT =
   '[ -e "$f" ] && echo "P $b:${f##*/} $(cat $f 2>/dev/null)"; ' +
   "done; done";
 
+// %C is expanded by ssh into a short hash of (local host, remote host, port,
+// user), so one socket per target without clashing across hosts.
+const SSH_CONTROL_PATH = `${tmpdir()}/opencode-watt-%C`;
+
 function section(stdout: string, sep: string, next: string): string {
   const start = stdout.indexOf(sep);
   if (start === -1) return "";
@@ -354,7 +434,12 @@ function section(stdout: string, sep: string, next: string): string {
   return slice.replace(/^\n/, "").replace(/\n$/, "");
 }
 
-export type SshTarget = { host: string; country?: string; timeout_ms?: number };
+export type SshTarget = {
+  host: string;
+  country?: string;
+  timeout_ms?: number;
+  control_master?: boolean;
+};
 
 export function sshProbes(exec: ExecFn, target: SshTarget): Probe[] {
   const host = target.host;
@@ -365,6 +450,22 @@ export function sshProbes(exec: ExecFn, target: SshTarget): Probe[] {
     `echo ${SEP_RAPL}; ${RAPL_SCRIPT} 2>/dev/null`,
     `echo ${SEP_HWMON}; ${HWMON_SCRIPT} 2>/dev/null`,
   ].join("; ");
+
+  // -n keeps stdin closed, BatchMode refuses to ask for a passphrase (a prompt
+  // would otherwise block the whole tick), ControlMaster reuses one connection
+  // across ticks instead of paying a handshake per sample.
+  const args = ["-n", "-o", "BatchMode=yes"];
+  if (target.control_master !== false) {
+    args.push(
+      "-o",
+      "ControlMaster=auto",
+      "-o",
+      `ControlPath=${SSH_CONTROL_PATH}`,
+      "-o",
+      "ControlPersist=60",
+    );
+  }
+  args.push(host, script);
 
   // One ssh exec per tick, shared across the section probes.
   let batchAt = -1;
@@ -377,7 +478,7 @@ export function sshProbes(exec: ExecFn, target: SshTarget): Probe[] {
     batchAt = now;
     batch = guard
       .run(async () => {
-        const res = await exec("ssh", [host, script], timeout);
+        const res = await exec("ssh", args, timeout);
         if (!res.ok) {
           lastStdout = "";
           // ssh reports connection failures as a non-zero exit (255)
@@ -407,62 +508,28 @@ export function sshProbes(exec: ExecFn, target: SshTarget): Probe[] {
 
   return [
     make(`nvidia-smi@${host}`, (stdout, now) => {
-      const text = section(stdout, SEP_NVIDIA, SEP_ROCM);
-      if (text.trim() === "") return { samples: [], status: "absent" };
-      const samples: Sample[] = parseNvidiaCsv(text).map((r) => ({
-        kind: "power",
-        source: `nvidia-smi@${host}`,
-        id: `gpu${r.gpu}`,
-        watts: r.watts,
-        at: now,
-      }));
-      return { samples, status: "ok" };
+      const rows = parseNvidiaCsv(section(stdout, SEP_NVIDIA, SEP_ROCM));
+      const samples = nvidiaSamples(`nvidia-smi@${host}`, rows, now);
+      return { samples, status: samples.length > 0 ? "ok" : "absent" };
     }),
     make(`rocm-smi@${host}`, (stdout, now) => {
-      const text = section(stdout, SEP_ROCM, SEP_RAPL);
-      if (text.trim() === "") return { samples: [], status: "absent" };
-      const samples: Sample[] = parseRocmJson(text).map((r) => ({
-        kind: "power",
-        source: `rocm-smi@${host}`,
-        id: r.gpu,
-        watts: r.watts,
-        at: now,
-      }));
-      return { samples, status: "ok" };
+      const rows = parseRocmJson(section(stdout, SEP_ROCM, SEP_RAPL));
+      const samples = rocmSamples(`rocm-smi@${host}`, rows, now);
+      return { samples, status: samples.length > 0 ? "ok" : "absent" };
     }),
     make(`rapl@${host}`, (stdout, now) => {
-      const text = section(stdout, SEP_RAPL, SEP_HWMON);
-      const zones = parseRaplText(text);
+      const zones = parseRaplText(section(stdout, SEP_RAPL, SEP_HWMON));
       if (zones.length === 0) return { samples: [], status: "absent" };
-      const samples: Sample[] = [];
-      for (const z of zones) {
-        if (z.uj === null) continue;
-        const id = z.path.split("/").pop() ?? z.path;
-        samples.push({
-          kind: "energy",
-          source: `rapl@${host}`,
-          id,
-          joules: z.uj / MJ,
-          ...(z.max_uj !== null && z.max_uj > 0 ? { wrap_max_j: z.max_uj / MJ } : {}),
-          at: now,
-        });
-      }
-      return {
-        samples,
-        status: (samples.length > 0 ? "ok" : "denied") as ProbeStatus,
-      };
+      const samples = raplSamples(`rapl@${host}`, zones, now);
+      return { samples, status: samples.length > 0 ? "ok" : "denied" };
     }),
     make(`hwmon@${host}`, (stdout, now) => {
-      const text = section(stdout, SEP_HWMON, "");
-      const samples: Sample[] = [];
-      for (const line of text.split("\n")) {
-        const [key, id, value] = line.trim().split(/\s+/);
-        if (key !== "P" || !id) continue;
-        const uw = Number(value);
-        if (!Number.isFinite(uw) || uw < 0) continue;
-        samples.push({ kind: "power", source: `hwmon@${host}`, id, watts: uw / MJ, at: now });
-      }
-      return { samples, status: (samples.length > 0 ? "ok" : "absent") as ProbeStatus };
+      const samples = hwmonSamples(
+        `hwmon@${host}`,
+        parseHwmonLines(section(stdout, SEP_HWMON, "")),
+        now,
+      );
+      return { samples, status: samples.length > 0 ? "ok" : "absent" };
     }),
   ];
 }
@@ -516,8 +583,7 @@ export function promProbe(
             if (!resp.ok) {
               return { samples: [], status: "error" as ProbeStatus };
             }
-            const body = await resp.json();
-            const values = parsePromResponse(JSON.stringify(body));
+            const values = promValues(await resp.json());
             values.forEach((watts, i) => {
               samples.push({
                 kind: "power",

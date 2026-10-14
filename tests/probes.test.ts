@@ -9,6 +9,7 @@ import {
   parsePromResponse,
   parseRocmJson,
   promProbe,
+  promValues,
   type ReadFn,
   raplProbes,
   rocmSmiProbe,
@@ -69,6 +70,20 @@ describe("parsePromResponse()", () => {
   it("returns empty on non-success or malformed", () => {
     expect(parsePromResponse('{"status":"error"}')).toEqual([]);
     expect(parsePromResponse("nope")).toEqual([]);
+  });
+});
+
+describe("promValues()", () => {
+  it("reads the values straight off the parsed body", () => {
+    expect(promValues({ status: "success", data: { result: [{ value: [123, "12"] }] } })).toEqual([
+      12,
+    ]);
+  });
+
+  it("ignores non-finite values", () => {
+    expect(
+      promValues({ status: "success", data: { result: [{ value: [1, "NaN"] }, {}] } }),
+    ).toEqual([]);
   });
 });
 
@@ -157,6 +172,16 @@ describe("raplProbes()", () => {
     ]);
   });
 
+  it("reads the zone metadata once and only the counter afterwards", async () => {
+    const read = vi.fn(readFn);
+    const probes = raplProbes(listFn, read as unknown as ReadFn, "local");
+    await probes[0].sample(1); // max + energy_uj
+    expect(read).toHaveBeenCalledTimes(2);
+
+    await probes[0].sample(2); // energy_uj only
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
   it("marks denied on EACCES and stops reading", async () => {
     const denying: ReadFn = (p) => {
       if (p.endsWith("/energy_uj")) {
@@ -171,7 +196,43 @@ describe("raplProbes()", () => {
     expect(first.samples).toEqual([]);
     const second = await probes[0].sample(2);
     expect(second.status).toBe("denied");
-    expect(reads).toHaveBeenCalledTimes(2); // name + energy reads once, then dead
+    expect(reads).toHaveBeenCalledTimes(2); // max + the denied energy read, then dead
+  });
+
+  it("marks denied when the zone listing is denied", async () => {
+    const probes = raplProbes(
+      () => {
+        throw Object.assign(new Error("denied"), { code: "EACCES" });
+      },
+      readFn,
+      "local",
+    );
+    expect(await probes[0].sample(1)).toEqual({ samples: [], status: "denied" });
+  });
+
+  it("reports absent when no top-level package zone exists", async () => {
+    const probes = raplProbes(() => ["intel-rapl-mmio"], readFn, "local");
+    expect(await probes[0].sample(1)).toEqual({ samples: [], status: "absent" });
+  });
+
+  it("skips zones whose counter is unreadable and stays ok", async () => {
+    const weird: ReadFn = (p) => {
+      if (p.endsWith("/energy_uj")) return "garbage\n";
+      return readFn(p);
+    };
+    const probes = raplProbes(listFn, weird, "local");
+    const res = await probes[0].sample(1);
+    expect(res.status).toBe("absent"); // no sample could be built
+    expect(res.samples).toEqual([]);
+  });
+
+  it("maps an unexpected counter error to status error", async () => {
+    const flaky: ReadFn = (p) => {
+      if (p.endsWith("/energy_uj")) throw Object.assign(new Error("EIO"), { code: "EIO" });
+      return readFn(p);
+    };
+    const probes = raplProbes(listFn, flaky, "local");
+    expect((await probes[0].sample(1)).status).toBe("error");
   });
 });
 
@@ -211,6 +272,65 @@ describe("hwmonProbes()", () => {
     });
     expect(all.every((s) => s.kind === "power" && !s.id.includes("temp1"))).toBe(true);
   });
+
+  it("resolves the present files once instead of probing missing ones every tick", async () => {
+    const read = vi.fn(readFn);
+    const probes = hwmonProbes(listFn, read as unknown as ReadFn, "local");
+    await probes[0].sample(1); // 2 chips x 4 candidates, then the 2 present files
+    expect(read).toHaveBeenCalledTimes(10);
+
+    await probes[0].sample(2); // only the 2 present files
+    expect(read).toHaveBeenCalledTimes(12);
+  });
+
+  it("re-resolves after the refresh window so hot-plugged meters appear", async () => {
+    const read = vi.fn(readFn);
+    const probes = hwmonProbes(listFn, read as unknown as ReadFn, "local");
+    await probes[0].sample(1);
+    expect(read).toHaveBeenCalledTimes(10);
+
+    await probes[0].sample(61_001); // sweep again, then the present files
+    expect(read.mock.calls.length).toBe(20);
+  });
+
+  it("reports absent when no chip exposes power", async () => {
+    const empty: Record<string, string> = { "/sys/class/hwmon": "hwmon0\n" };
+    const probes = hwmonProbes(
+      (p) => (empty[p] ?? "").split("\n"),
+      () => {
+        throw new Error("missing");
+      },
+      "local",
+    );
+    expect((await probes[0].sample(1)).status).toBe("absent");
+  });
+
+  it("reports absent when the hwmon directory cannot be listed", async () => {
+    const probes = hwmonProbes(
+      () => {
+        throw Object.assign(new Error("denied"), { code: "EACCES" });
+      },
+      readFn,
+      "local",
+    );
+    expect((await probes[0].sample(1)).status).toBe("absent");
+  });
+
+  it("ignores a sensor whose value is not a finite number", async () => {
+    const weird: ReadFn = (p) => (p.endsWith("power1_average") ? "  N/A  \n" : readFn(p));
+    const probes = hwmonProbes(listFn, weird, "local");
+    const res = await probes[0].sample(1);
+    expect(res.samples.some((s) => s.id === "hwmon0:power1_average")).toBe(false);
+    expect(res.status).toBe("ok"); // hwmon1 still reports
+  });
+
+  it("ignores a negative microwatt reading", async () => {
+    const weird: ReadFn = (p) => (p.endsWith("power1_input") ? "-5\n" : readFn(p));
+    const probes = hwmonProbes(listFn, weird, "local");
+    const res = await probes[0].sample(1);
+    expect(res.samples.some((s) => s.id === "hwmon1:power1_input")).toBe(false);
+    expect(res.status).toBe("ok"); // hwmon0 still reports
+  });
 });
 
 describe("sshProbes()", () => {
@@ -218,8 +338,8 @@ describe("sshProbes()", () => {
     let calls = 0;
     const exec: ExecFn = async (_f, args) => {
       calls++;
-      expect(args[0]).toBe("ricinus");
-      expect(args[1]).toContain("===WATT-NVIDIA===");
+      expect(args.includes("ricinus")).toBe(true);
+      expect(args[args.length - 1]).toContain("===WATT-NVIDIA===");
       return {
         ok: true,
         stdout:
@@ -250,6 +370,50 @@ describe("sshProbes()", () => {
     const probes = sshProbes(errExec("EXIT"), { host: "down", timeout_ms: 100 });
     const res = await Promise.all(probes.map((p) => p.sample(1)));
     expect(res.every((r) => r.status === "unreachable" && r.samples.length === 0)).toBe(true);
+  });
+
+  it("maps an ssh timeout to unreachable and an unknown code to error", async () => {
+    const probes = sshProbes(errExec("TIMEOUT"), { host: "slow", timeout_ms: 100 });
+    const res = await Promise.all(probes.map((p) => p.sample(1)));
+    expect(res.every((r) => r.status === "unreachable")).toBe(true);
+
+    const probes2 = sshProbes(errExec("WHATEVER"), { host: "weird", timeout_ms: 100 });
+    const res2 = await Promise.all(probes2.map((p) => p.sample(1)));
+    expect(res2.every((r) => r.status === "error")).toBe(true);
+  });
+
+  it("never blocks on a passphrase prompt and reuses one connection", async () => {
+    const args: string[][] = [];
+    const exec: ExecFn = async (_f, a) => {
+      args.push(a);
+      return { ok: true, stdout: "===WATT-NVIDIA===\n" } as ExecResult;
+    };
+    const probes = sshProbes(exec, { host: "ricinus", timeout_ms: 1000 });
+    await Promise.all(probes.map((p) => p.sample(1)));
+    await Promise.all(probes.map((p) => p.sample(2)));
+
+    expect(args).toHaveLength(2);
+    expect(args.every((a) => a[0] === "-n")).toBe(true);
+    expect(args.every((a) => a.includes("BatchMode=yes"))).toBe(true);
+    expect(args.every((a) => a.includes("ControlMaster=auto"))).toBe(true);
+    expect(args.every((a) => a.includes("ControlPersist=60"))).toBe(true);
+    const last = args[args.length - 1] as string[];
+    expect(last.includes("ricinus")).toBe(true);
+    expect(last[last.length - 1]).toContain("===WATT-NVIDIA===");
+  });
+
+  it("drops connection reuse when control_master is disabled", async () => {
+    const args: string[][] = [];
+    const exec: ExecFn = async (_f, a) => {
+      args.push(a);
+      return { ok: true, stdout: "" } as ExecResult;
+    };
+    const probes = sshProbes(exec, { host: "ricinus", timeout_ms: 1000, control_master: false });
+    await Promise.all(probes.map((p) => p.sample(1)));
+
+    expect(args).toHaveLength(1);
+    expect(args[0].some((a) => a.includes("ControlMaster"))).toBe(false);
+    expect(args[0].includes("BatchMode=yes")).toBe(true);
   });
 });
 
