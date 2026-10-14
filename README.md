@@ -67,10 +67,15 @@ All options are optional; pass them in the plugin tuple:
           "auth_token_env": "PROM_TOKEN"
         }
       ]
-    }]
-  ]
+    ]
+  }
 }
 ```
+
+`ssh_control` (default `true`) reuses one SSH connection across ticks
+(`ControlMaster`) instead of paying a handshake per sample. Set it to `false` to
+disable connection reuse for a given run (or per target with
+`"control_master": false`).
 
 Pricing precedence per meter: explicit `price_per_kwh` > `windows` match at
 sample time > built-in `TARIFFS[country]` (approximate retail averages, early
@@ -82,7 +87,7 @@ resolved rate, so sessions spanning HP/HC windows sum correctly.
 
 - **`power_cost` tool**: ask the model, or call it directly. Args: `scope` =
   `session` (default) | `today` | `all`. Shows watts per meter, kWh (raw and
-  attributed), cost, active rate, and probe statuses.
+  attributed), cost, active rate, baseline warm-up, and probe statuses.
 - **Toast**: when a session ends having consumed more than 1 Wh, a TUI toast
   shows the session's kWh and cost.
 - **State**: `$XDG_DATA_HOME/opencode-watt/state.json` (default
@@ -92,6 +97,23 @@ resolved rate, so sessions spanning HP/HC windows sum correctly.
 Attribution is per busy session: when several sessions generate concurrently
 the device power is split equally between them. Energy attributed to no session
 (idle, tail) is still counted in the daily totals.
+
+### What the number covers
+
+`nvidia-smi`/`rocm-smi` report GPU board power, RAPL reports CPU package energy.
+DRAM (a few W idle, much more on a long KV cache), PSU losses (roughly 10% at the
+wall), fans and the board itself are **not** covered, so the reported kWh is a
+lower bound of the machine's wall draw, not a meter reading. On a host where both
+`rocm-smi` and an amdgpu `hwmon` entry are readable, the same GPU is counted by
+two meters; disable one of them if that matters.
+
+The idle baseline is a rolling mean of the idle-rate samples seen so far. While
+the window is still filling, `power_cost` reports it (`baseline: 3/30 samples`):
+the first reading seeds it, so a session started while the host was already busy
+is not charged the whole machine.
+
+Sampling backs off exponentially (up to 60 s) while no meter reports `ok`, so a
+machine without any readable meter costs almost nothing to watch.
 
 ## Development
 

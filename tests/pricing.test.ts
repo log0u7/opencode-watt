@@ -145,4 +145,34 @@ describe("resolveRate() time-of-use windows", () => {
     const rate = resolveRate({ ...cfg, price_per_kwh: 0.1 }, at(23), undefined, "UTC");
     expect(rate.price_per_kwh).toBe(0.1);
   });
+
+  it("treats a degenerate window (start == end) as always on", () => {
+    const rate = resolveRate(
+      { windows: [{ start: "06:00", end: "06:00", price_per_kwh: 0.4 }] },
+      at(12),
+      undefined,
+      "UTC",
+    );
+    expect(rate.price_per_kwh).toBe(0.4);
+    expect(rate.label).toBe("06:00-06:00");
+  });
+
+  it("ignores malformed windows instead of matching them", () => {
+    const rate = resolveRate(
+      { windows: [{ start: "25:00", end: "06:00", price_per_kwh: 0.4 }] },
+      at(3),
+      undefined,
+      "UTC",
+    );
+    expect(rate.label).toBe("FR");
+  });
+});
+
+describe("resolveRate() unknown country", () => {
+  it("falls back to the FR tariff and its currency", () => {
+    const rate = resolveRate({ country: "ZZ" }, at(12), undefined, "UTC");
+    expect(rate.currency).toBe("EUR");
+    expect(rate.price_per_kwh).toBe(TARIFFS.FR.kwh);
+    expect(rate.label).toBe("ZZ");
+  });
 });

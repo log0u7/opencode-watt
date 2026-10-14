@@ -60,6 +60,8 @@ export const WattV2 = Plugin.define({
           engine.handleStatus(event.data.sessionID, event.data.status.type);
         } else if (event.type === "session.idle") {
           await engine.handleIdle(event.data.sessionID);
+        } else if (event.type === "session.deleted") {
+          engine.forget(event.data.sessionID);
         }
       }
     })().catch(() => {

@@ -74,6 +74,40 @@ describe("loadState()", () => {
     expect(state.days).toEqual({});
   });
 
+  it("defaults missing sessions and probe_status fields", () => {
+    const path = tmpFile("partial.json");
+    writeFileSync(path, JSON.stringify({ version: 1, days: { "2026-09-28": { raw_j: 1 } } }));
+    const state = loadState(path, 0);
+    expect(state.sessions).toEqual({});
+    expect(state.probe_status).toEqual({});
+    expect(state.days["2026-09-28"]?.raw_j).toBe(1);
+  });
+
+  it("prunes sessions older than the retention window", () => {
+    const path = tmpFile("stale.json");
+    const stale = freshEntry();
+    stale.sessions.old = {
+      model: "m",
+      started: 0,
+      last_active: 0,
+      raw_j: 1,
+      attributed_j: 1,
+      cost: 0,
+    };
+    stale.sessions.recent = {
+      model: "m",
+      started: DAY,
+      last_active: 2 * DAY,
+      raw_j: 1,
+      attributed_j: 1,
+      cost: 0,
+    };
+    saveState(path, stale);
+    const state = loadState(path, 31 * DAY); // SESSION_TTL_MS = 30 days, strictly expired
+    expect(state.sessions.old).toBeUndefined();
+    expect(state.sessions.recent?.started).toBe(DAY);
+  });
+
   it("returns a fresh state on wrong version", () => {
     const path = tmpFile("wrong-version.json");
     writeFileSync(path, JSON.stringify({ version: 99, days: 1 }));

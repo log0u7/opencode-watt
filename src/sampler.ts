@@ -31,10 +31,14 @@ export class EnergyIntegrator {
     for (const s of samples) {
       const key = `${s.source}:${s.id}`;
       const prev = this.last.get(key);
-      this.last.set(key, { sample: s, at: now });
+      // Spans are measured between the readings themselves, so a slow meter
+      // (process spawn) shifts its own next span instead of shrinking it.
+      // `now` is the fallback for an injected probe that stamps nothing.
+      const at = Number.isFinite(s.at) ? s.at : now;
+      this.last.set(key, { sample: s, at });
       if (!prev) continue;
 
-      const span = Math.max(1e-9, (now - prev.at) / 1000);
+      const span = Math.max(1e-9, (at - prev.at) / 1000);
       let accrual: number;
       let rate: number;
 
@@ -60,7 +64,9 @@ export class EnergyIntegrator {
 
       this.rates.set(key, rate);
       raw += accrual;
-      if (busyCount === 0) {
+      // First derivable rate seeds the baseline: without it a session that starts
+      // while the host is already busy would be charged the whole machine.
+      if (busyCount === 0 || !this.baselines.has(key)) {
         this.recordBaseline(key, rate);
       }
       let attributedAccrual: number;
@@ -93,6 +99,17 @@ export class EnergyIntegrator {
       });
     }
     return out;
+  }
+
+  // How many baseline samples the least-warm meter has collected. Used by the
+  // report to disclose that idle subtraction is still converging.
+  baselineProgress(): { filled: number; window: number } {
+    const window = this.opts.baseline_window ?? DEFAULT_BASELINE_WINDOW;
+    let filled = this.baselines.size === 0 ? 0 : window;
+    for (const ring of this.baselines.values()) {
+      filled = Math.min(filled, ring.length);
+    }
+    return { filled, window };
   }
 
   private recordBaseline(key: string, rate: number): void {

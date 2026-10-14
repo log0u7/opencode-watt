@@ -9,6 +9,7 @@ describe("normalizeConfig()", () => {
     expect(cfg.idle_interval_ms).toBe(10000);
     expect(cfg.tail_ms).toBe(5000);
     expect(cfg.subtract_idle).toBe(true);
+    expect(cfg.ssh_control).toBe(true);
     expect(cfg.country).toBeNull();
     expect(cfg.price_per_kwh).toBeNull();
     expect(cfg.currency).toBeNull();
@@ -25,10 +26,12 @@ describe("normalizeConfig()", () => {
       price_per_kwh: 0.3,
       windows: [{ start: "22:00", end: "06:00", price_per_kwh: 0.2 }],
       ssh: [{ host: "box", timeout_ms: 500 }],
+      ssh_control: false,
       prom: [{ base_url: "http://x:8428", queries: [{ name: "g", query: "q" }] }],
     });
     expect(cfg.interval_ms).toBe(2000);
     expect(cfg.subtract_idle).toBe(false);
+    expect(cfg.ssh_control).toBe(false);
     expect(cfg.country).toBe("DE");
     expect(cfg.price_per_kwh).toBe(0.3);
     expect(cfg.windows).toHaveLength(1);
