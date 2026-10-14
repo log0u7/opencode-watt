@@ -11,6 +11,9 @@ export type WattReading = { source: string; id: string; watts: number; at: numbe
 type Sight = { sample: Sample; at: number };
 
 const DEFAULT_BASELINE_WINDOW = 30;
+// A power span longer than this is a clock jump (suspended process resuming),
+// not a real sampling interval: integrating it would inflate the energy.
+const MAX_POWER_SPAN_S = 3600;
 
 // Integrates probe samples into energy (joules) per tick.
 // - energy counters: accrue the exact delta between sightings (wrap-aware)
@@ -19,7 +22,7 @@ const DEFAULT_BASELINE_WINDOW = 30;
 //   subtracted per meter with a floor at zero when subtract_idle is set
 export class EnergyIntegrator {
   private last = new Map<string, Sight>();
-  private rates = new Map<string, number>();
+  private readings = new Map<string, WattReading>();
   private baselines = new Map<string, number[]>();
 
   constructor(private readonly opts: { subtract_idle: boolean; baseline_window?: number }) {}
@@ -38,7 +41,12 @@ export class EnergyIntegrator {
       this.last.set(key, { sample: s, at });
       if (!prev) continue;
 
-      const span = Math.max(1e-9, (at - prev.at) / 1000);
+      const span = (at - prev.at) / 1000;
+      // A non-positive span means the clock stepped backwards (or two readings
+      // share a stamp): resync without accruing, and never derive a rate that
+      // would poison the idle baseline.
+      if (span <= 0) continue;
+
       let accrual: number;
       let rate: number;
 
@@ -47,7 +55,9 @@ export class EnergyIntegrator {
         let delta = s.joules - p.joules;
         if (delta < 0) {
           const wrapMax = s.wrap_max_j ?? p.wrap_max_j;
-          if (wrapMax !== undefined) {
+          // A wrap only makes sense if the previous value was near the limit;
+          // a drop from mid-range is a counter reset (reboot), not a wrap.
+          if (wrapMax !== undefined && p.joules >= wrapMax * 0.5) {
             const wrapped = wrapMax - p.joules + s.joules;
             delta = wrapped >= 0 && wrapped <= wrapMax ? wrapped : 0;
           } else {
@@ -57,12 +67,15 @@ export class EnergyIntegrator {
         accrual = delta;
         rate = delta / span;
       } else {
+        // Power is area under the curve: an implausibly long span would inflate
+        // it, so treat it as a clock jump and skip this interval.
+        if (span > MAX_POWER_SPAN_S) continue;
         const p = prev.sample as PowerSample;
         accrual = ((p.watts + s.watts) / 2) * span;
         rate = s.watts;
       }
 
-      this.rates.set(key, rate);
+      this.readings.set(key, { source: s.source, id: s.id, watts: rate, at });
       raw += accrual;
       // First derivable rate seeds the baseline: without it a session that starts
       // while the host is already busy would be charged the whole machine.
@@ -86,19 +99,7 @@ export class EnergyIntegrator {
   }
 
   lastWatts(): WattReading[] {
-    const out: WattReading[] = [];
-    for (const [key, rate] of this.rates) {
-      const sight = this.last.get(key);
-      if (!sight) continue;
-      const sep = key.indexOf(":");
-      out.push({
-        source: key.slice(0, sep),
-        id: key.slice(sep + 1),
-        watts: rate,
-        at: sight.at,
-      });
-    }
-    return out;
+    return [...this.readings.values()];
   }
 
   // How many baseline samples the least-warm meter has collected. Used by the

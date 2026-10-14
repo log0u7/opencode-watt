@@ -49,6 +49,35 @@ describe("EnergyIntegrator", () => {
     expect(t1.raw_j).toBe(0);
   });
 
+  it("treats a counter drop far from the wrap limit as a reset", () => {
+    const itg = new EnergyIntegrator({ subtract_idle: false });
+    const max = 1_000_000;
+    itg.tick([energy("c", 100_000, 0, max)], 0); // only 10% into the range
+    const t1 = itg.tick([energy("c", 1_000, 1000, max)], 1000); // dropped: reset, not wrap
+    expect(t1.raw_j).toBe(0);
+  });
+
+  it("does not accrue when the clock steps backwards", () => {
+    const itg = new EnergyIntegrator({ subtract_idle: false });
+    itg.tick([power("g", 10, 5000)], 5000);
+    const t1 = itg.tick([power("g", 20, 1000)], 1000); // clock jumped back
+    expect(t1.raw_j).toBe(0);
+  });
+
+  it("does not accrue power across an implausibly long span (clock jump)", () => {
+    const itg = new EnergyIntegrator({ subtract_idle: false });
+    itg.tick([power("g", 10, 0)], 0);
+    const t1 = itg.tick([power("g", 10, 10_000_000)], 10_000_000);
+    expect(t1.raw_j).toBe(0);
+  });
+
+  it("still accrues counter energy across a long span", () => {
+    const itg = new EnergyIntegrator({ subtract_idle: false });
+    itg.tick([energy("c", 0, 0)], 0);
+    const t1 = itg.tick([energy("c", 5_000_000, 10_000_000)], 10_000_000);
+    expect(t1.raw_j).toBe(5_000_000);
+  });
+
   it("integrates power samples trapezoidally", () => {
     const itg = new EnergyIntegrator({ subtract_idle: false });
     itg.tick([power("g", 10, 0)], 0);
@@ -157,6 +186,22 @@ describe("EnergyIntegrator", () => {
       const itg = new EnergyIntegrator({ subtract_idle: false });
       itg.tick([energy("c", 1_000_000, 1000)], 1000);
       expect(itg.lastWatts()).toEqual([]);
+    });
+
+    it("preserves a source that contains a colon", () => {
+      const itg = new EnergyIntegrator({ subtract_idle: false });
+      const mk = (watts: number, at: number): Sample => ({
+        kind: "power",
+        source: "prom@vm:8428",
+        id: "gpu0",
+        watts,
+        at,
+      });
+      itg.tick([mk(10, 1000)], 1000, 1);
+      itg.tick([mk(20, 3000)], 3000, 1);
+      const w = itg.lastWatts().find((x) => x.source === "prom@vm:8428");
+      expect(w?.id).toBe("gpu0");
+      expect(w?.watts).toBe(20);
     });
   });
 });

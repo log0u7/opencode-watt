@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SECURITY.md` (a `memory.db` store that does not exist here).
 - Type error in `tests/sampler.test.ts` (imported `Sample` from the wrong
   module), now caught by the test type-check.
+- Sampler: a backwards clock step (or two readings sharing a timestamp) no
+  longer produces a `delta / 1e-9` energy spike that poisoned the idle baseline;
+  the interval is skipped and resynced.
+- Sampler: a power interval longer than one hour (a suspended process resuming)
+  is treated as a clock jump instead of being integrated, so it can no longer
+  inflate the energy.
+- Sampler: a counter drop is treated as a wrap only when the previous value was
+  near the wrap limit; a drop from mid-range is a reset and now contributes
+  zero instead of a spurious ~92% of the range.
+- Sampler: `lastWatts()` now preserves meter sources that contain a colon
+  (e.g. `prom@vm:8428`) instead of truncating them.
 
 ## [0.2.0] - 2026-10-14
 
