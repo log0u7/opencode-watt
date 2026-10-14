@@ -115,6 +115,21 @@ describe("EnergyIntegrator", () => {
       expect(busy.attributed_j).toBeCloseTo(40 - 10, 6);
     });
 
+    it("is robust to one idle outlier (median, not mean)", () => {
+      const itg = new EnergyIntegrator({ subtract_idle: true });
+      // 29 idle ticks at 10 W, then one tick where something else ran (1000 W)
+      for (let i = 0; i < 30; i++) {
+        itg.tick([power("g", 10, i * 1000)], i * 1000);
+      }
+      itg.tick([power("g", 1000, 30_000)], 30_000);
+      for (let i = 31; i < 60; i++) {
+        itg.tick([power("g", 10, i * 1000)], i * 1000);
+      }
+      const busy = itg.tick([power("g", 50, 60_000)], 60_000, 1);
+      // median of the ring (29x10 W + 1x1000 W) = 10 W; the mean would be ~43 W
+      expect(busy.attributed_j).toBeCloseTo(busy.raw_j - 10, 6);
+    });
+
     it("skips subtraction when disabled", () => {
       const itg = new EnergyIntegrator({ subtract_idle: false });
       itg.tick([power("g", 10, 0)], 0);

@@ -4,15 +4,19 @@ Guidance for coding agents working in this repository.
 
 ## Project
 
-<!-- describe the project in 2-4 lines -->
+OpenCode plugin that measures the electric power and cost of local LLM
+inference: it samples host meters (nvidia-smi, rocm-smi, RAPL, hwmon, SSH
+targets, Prometheus), integrates energy while sessions are busy, subtracts the
+idle baseline, and prices the result. Zero runtime dependencies, TypeScript
+strict, dual export for OpenCode 1.18 and 2.x.
 
 ## Commands
 
-<!-- setup: replace with real commands -->
-
-- Test: `# run the test suite (all green required)`
-- Lint: `# run the linter (zero offenses required)`
-- Build: `# run the build`
+- Setup: `pnpm install` (Node 22 via mise, pnpm 11)
+- Verify (canonical, all green required): `pnpm verify`
+  (biome + typecheck + vitest)
+- Coverage gate: `pnpm test:coverage` (branches >= 80 %, lines/functions >= 90 %)
+- Build: `pnpm build` (tsc -> dist/), `pnpm build:check` (build + pack dry-run)
 
 ## Workflow
 

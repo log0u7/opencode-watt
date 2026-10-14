@@ -150,6 +150,7 @@ export function parsePromResponse(body: string): number[] {
 
 export type RaplZone = {
   path: string;
+  id?: string;
   name: string | null;
   uj: number | null;
   max_uj: number | null;
@@ -216,7 +217,7 @@ export function raplSamples(source: string, zones: RaplZone[], at: number): Samp
     samples.push({
       kind: "energy",
       source,
-      id: z.path.split("/").pop() ?? z.path,
+      id: z.id ?? z.path.split("/").pop() ?? z.path,
       joules: z.uj / MJ,
       ...(wrapMax !== undefined ? { wrap_max_j: wrapMax } : {}),
       at,
@@ -276,16 +277,29 @@ export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] 
   const source = `rapl@${target}`;
   const base = "/sys/class/powercap";
   const guard = new Guard(() => true); // rapl: any failure is permanent (denied/absent)
-  type Zone = { path: string; max_uj: number | null };
+  type Zone = { path: string; id: string; max_uj: number | null };
   let zones: Zone[] | null = null;
 
   // Resolves once: the zone list and the wrap limits are constant, only the
-  // counters move.
+  // counters move. Subzones are kept only for the dram domain: core/uncore
+  // are already inside the package zone.
   const resolve = async (): Promise<{ status: ProbeStatus; zones?: Zone[] }> => {
     try {
       const zonesFound: Zone[] = [];
       const entries = await list(base);
-      for (const entry of entries.filter((n) => /^intel-rapl:\d+$/.test(n))) {
+      for (const entry of entries.filter((n) => /^intel-rapl:\d+(:\d+)?$/.test(n))) {
+        const subzone = /:\d+$/.test(entry) && entry.split(":").length === 3;
+        let id = entry;
+        if (subzone) {
+          let domain: string | null = null;
+          try {
+            domain = (await read(`${base}/${entry}/name`)).trim() || null;
+          } catch {
+            domain = null;
+          }
+          if (domain !== "dram") continue;
+          id = `${entry.replace(/:\d+$/, "")}:dram`;
+        }
         let maxUj: number | null = null;
         try {
           const max = Number((await read(`${base}/${entry}/max_energy_range_uj`)).trim());
@@ -293,7 +307,7 @@ export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] 
         } catch {
           // optional
         }
-        zonesFound.push({ path: `${base}/${entry}`, max_uj: maxUj });
+        zonesFound.push({ path: `${base}/${entry}`, id, max_uj: maxUj });
       }
       return { status: zonesFound.length > 0 ? "ok" : "absent", zones: zonesFound };
     } catch (error) {
@@ -320,6 +334,7 @@ export function raplProbes(list: ListFn, read: ReadFn, target: string): Probe[] 
               if (!Number.isFinite(uj)) continue;
               readings.push({
                 path: zone.path,
+                id: zone.id,
                 name: null,
                 uj,
                 max_uj: zone.max_uj,

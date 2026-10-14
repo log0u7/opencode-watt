@@ -71,7 +71,7 @@ export class EnergyIntegrator {
       }
       let attributedAccrual: number;
       if (this.opts.subtract_idle) {
-        const baseline = this.meanBaseline(key);
+        const baseline = this.medianBaseline(key);
         attributedAccrual = Math.max(0, accrual - (baseline ?? 0) * span);
       } else {
         attributedAccrual = accrual;
@@ -120,9 +120,15 @@ export class EnergyIntegrator {
     this.baselines.set(key, ring);
   }
 
-  private meanBaseline(key: string): number | null {
+  // Median, not mean: one idle tick polluted by another process (a compile,
+  // an app launch) must not inflate the baseline for the next window.
+  private medianBaseline(key: string): number | null {
     const ring = this.baselines.get(key);
     if (!ring || ring.length === 0) return null;
-    return ring.reduce((a, b) => a + b, 0) / ring.length;
+    const sorted = [...ring].sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    return sorted.length % 2 === 1
+      ? (sorted[mid] as number)
+      : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
   }
 }

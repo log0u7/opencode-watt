@@ -39,6 +39,13 @@ describe("normalizeConfig()", () => {
     expect(cfg.prom[0]?.base_url).toBe("http://x:8428");
   });
 
+  it("keeps only non-empty strings in meters", () => {
+    expect(normalizeConfig({ meters: ["nvidia-smi", 42, ""] }).meters).toEqual(["nvidia-smi"]);
+    expect(normalizeConfig({ meters: [] }).meters).toBeNull();
+    expect(normalizeConfig({ meters: "nvidia" }).meters).toBeNull();
+    expect(normalizeConfig(undefined).meters).toBeNull();
+  });
+
   it("replaces invalid values with defaults", () => {
     const cfg = normalizeConfig({
       interval_ms: -5,

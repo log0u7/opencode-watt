@@ -66,7 +66,8 @@ All options are optional; pass them in the plugin tuple:
           "queries": [{ "name": "gpu0", "query": "DCGM_FI_DEV_GPU_POWER{gpu=\"0\"}" }],
           "auth_token_env": "PROM_TOKEN"
         }
-      ]
+      ],
+      "meters": null
     ]
   }
 }
@@ -76,6 +77,12 @@ All options are optional; pass them in the plugin tuple:
 (`ControlMaster`) instead of paying a handshake per sample. Set it to `false` to
 disable connection reuse for a given run (or per target with
 `"control_master": false`).
+
+`meters` is an optional allowlist of source prefixes (`"meters": ["nvidia-smi"]`
+keeps nvidia-smi on every target, local and remote, and drops rocm-smi, RAPL and
+hwmon). Use it when two meters report the same device: on an AMD host,
+`rocm-smi` and the amdgpu hwmon entry both expose the GPU and would double-count
+it (`"meters": ["rocm-smi"]` keeps one). Default `null`: every available meter.
 
 Pricing precedence per meter: explicit `price_per_kwh` > `windows` match at
 sample time > built-in `TARIFFS[country]` (approximate retail averages, early
@@ -100,17 +107,20 @@ the device power is split equally between them. Energy attributed to no session
 
 ### What the number covers
 
-`nvidia-smi`/`rocm-smi` report GPU board power, RAPL reports CPU package energy.
-DRAM (a few W idle, much more on a long KV cache), PSU losses (roughly 10% at the
-wall), fans and the board itself are **not** covered, so the reported kWh is a
-lower bound of the machine's wall draw, not a meter reading. On a host where both
-`rocm-smi` and an amdgpu `hwmon` entry are readable, the same GPU is counted by
-two meters; disable one of them if that matters.
+`nvidia-smi`/`rocm-smi` report GPU board power, RAPL reports CPU package energy
+plus the DRAM subzone when the host exposes it (`intel-rapl:*:dram`), which is
+where most of an LLM inference moves (KV cache, weights). PSU losses (roughly
+10% at the wall), fans and the board itself are **not** covered, so the reported
+kWh is a lower bound of the machine's wall draw, not a meter reading.
 
-The idle baseline is a rolling mean of the idle-rate samples seen so far. While
-the window is still filling, `power_cost` reports it (`baseline: 3/30 samples`):
-the first reading seeds it, so a session started while the host was already busy
-is not charged the whole machine.
+When two meters report the same device (AMD host: `rocm-smi` and the amdgpu
+hwmon entry), use the `meters` allowlist to keep one.
+
+The idle baseline is the median of the idle-rate samples seen so far, robust to
+one idle tick polluted by another process. While the window is still filling,
+`power_cost` reports it (`baseline: 3/30 samples`): the first reading seeds it,
+so a session started while the host was already busy is not charged the whole
+machine.
 
 Sampling backs off exponentially (up to 60 s) while no meter reports `ok`, so a
 machine without any readable meter costs almost nothing to watch.
