@@ -1,6 +1,6 @@
 {
   "name": "@log0u7/opencode-watt",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Electric power and cost of local LLM inference for OpenCode: samples nvidia-smi/rocm-smi/RAPL/hwmon locally or over SSH, or Prometheus/VictoriaMetrics meters, integrates energy, and prices it per kWh with geolocation-based tariffs.",
   "type": "module",
   "license": "Apache-2.0",
