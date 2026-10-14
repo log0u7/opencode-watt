@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `meters` option: allowlist of source prefixes, to keep a single GPU meter on
   hosts where two meters report the same device (AMD: `rocm-smi` + amdgpu
   hwmon).
+- `power_cost` accepts `format: "json"` returning the report as structured data
+  (meters, rate, baseline, session/day/totals, probe statuses, budget); the
+  default stays human-readable text.
+- `daily_budget_kwh` option: a TUI toast warns once per day when attributed
+  energy crosses the configured threshold.
 
 ### Changed
 

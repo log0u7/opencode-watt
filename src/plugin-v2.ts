@@ -31,7 +31,7 @@ export const WattV2 = Plugin.define({
       editor.add({
         name: "power_cost",
         description:
-          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all).",
+          "Report electric power and cost of local LLM inference measured by opencode-watt (watts now, kWh and money per session/day/all, idle baseline, probe statuses; scope/format args, json available). Warns once per day when the configured daily budget is exceeded.",
         input: {
           type: "object",
           properties: {
@@ -40,12 +40,26 @@ export const WattV2 = Plugin.define({
               enum: ["session", "today", "all"],
               description: "Report scope: current session (default), today, or all recorded days",
             },
+            format: {
+              type: "string",
+              enum: ["text", "json"],
+              description: "Output format: human-readable text (default) or JSON",
+            },
           },
           additionalProperties: false,
         },
         async execute(input, context) {
-          const scope = (input as { scope?: "session" | "today" | "all" }).scope;
-          return { content: await engine.report(scope ?? "session", context.sessionID) };
+          const { scope, format } = input as {
+            scope?: "session" | "today" | "all";
+            format?: "text" | "json";
+          };
+          const resolved = scope ?? "session";
+          return {
+            content:
+              format === "json"
+                ? JSON.stringify(await engine.reportData(resolved, context.sessionID), null, 2)
+                : await engine.report(resolved, context.sessionID),
+          };
         },
       });
     });

@@ -11,6 +11,7 @@ export type WattConfig = {
   price_per_kwh: number | null;
   currency: string | null;
   meters: string[] | null;
+  daily_budget_kwh: number | null;
   windows: RateWindow[];
   ssh: SshTarget[];
   prom: PromTarget[];
@@ -74,6 +75,7 @@ export function normalizeConfig(raw: unknown): WattConfig {
         : null,
     currency: str(r.currency),
     meters: strList(r.meters),
+    daily_budget_kwh: num(r.daily_budget_kwh, 0, 0) || null,
     windows,
     ssh,
     prom,

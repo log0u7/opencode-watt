@@ -152,7 +152,7 @@ export function createEngine(
       const res = integrator.tick(samples, now, busy.size);
       const dk = dayKey(new Date(now));
       const existing = state.days[dk];
-      const day = existing ?? { raw_j: 0, attributed_j: 0, cost: 0 };
+      const day = existing ?? { raw_j: 0, attributed_j: 0, cost: 0, budget_warned: false };
       if (!existing) state.days[dk] = day;
       day.raw_j += res.raw_j;
       day.attributed_j += res.attributed_j;
@@ -166,6 +166,14 @@ export function createEngine(
           entry.attributed_j += ps.attributed_j * share;
           entry.cost += cost(ps.attributed_j * share, rate);
         }
+      }
+      // Daily budget: warn once per day, exactly when the threshold is crossed.
+      const budget = cfg.daily_budget_kwh ?? null;
+      if (budget !== null && !day.budget_warned && day.attributed_j > budget * JOULES_PER_KWH) {
+        day.budget_warned = true;
+        await host.notify(
+          `opencode-watt daily budget: ${kwh(day.attributed_j)} of ${budget.toFixed(3)} kWh today (${day.cost.toFixed(3)} ${rateFor(undefined, new Date(now)).currency})`,
+        );
       }
     } catch (error) {
       await log("warn", `tick failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -228,46 +236,33 @@ export function createEngine(
     ensureEntry(sessionID).model = model;
   };
 
-  async function report(scope: "session" | "today" | "all", sessionID: string): Promise<string> {
-    const lines: string[] = [`power_cost (${scope})`];
-    const now = Date.now();
-    const meters = integrator.lastWatts();
-    if (probes.length === 0) {
-      lines.push(
-        "no meters found: configure ssh/prom targets in the plugin options, or check probe statuses below",
-      );
-    } else if (meters.length === 0) {
-      lines.push("no samples yet (waiting for the first sampling tick)");
-    } else {
-      for (const m of meters) {
-        const age = ((now - m.at) / 1000).toFixed(1);
-        lines.push(`now: ${m.source}:${m.id} ${m.watts.toFixed(1)} W (age ${age}s)`);
-      }
-    }
-    const rate = rateFor(undefined, new Date());
-    lines.push(
-      `rate: ${rate.price_per_kwh.toFixed(4)} ${rate.currency}/kWh (${rate.label}${cfg.subtract_idle ? ", idle subtracted" : ""})`,
-    );
-    if (cfg.subtract_idle && probes.length > 0) {
-      const { filled, window } = integrator.baselineProgress();
-      lines.push(`baseline: ${filled}/${window} samples`);
-    }
+  type ReportData = {
+    scope: "session" | "today" | "all";
+    meters: { source: string; id: string; watts: number; age_s: number }[];
+    rate: ReturnType<typeof resolveRate>;
+    baseline: { filled: number; window: number } | null;
+    session: {
+      attributed_kwh: number;
+      cost: number;
+      raw_kwh: number;
+      model: string | null;
+    } | null;
+    day: { attributed_kwh: number; cost: number; raw_kwh: number } | null;
+    totals: { attributed_kwh: number; cost: number; raw_kwh: number } | null;
+    probes: Record<string, string>;
+    budget: { budget_kwh: number; attributed_kwh: number } | null;
+  };
 
-    const sessionEntry = state.sessions[sessionID];
-    if (scope === "session") {
-      if (!sessionEntry) {
-        lines.push("session: no energy recorded yet");
-      } else {
-        lines.push(
-          `session: ${kwh(sessionEntry.attributed_j)} kWh · ${sessionEntry.cost.toFixed(4)} ${rate.currency} (raw ${kwh(sessionEntry.raw_j)} kWh${sessionEntry.model ? `, model ${sessionEntry.model}` : ""})`,
-        );
-      }
-    } else if (scope === "today") {
-      const day = state.days[dayKey(new Date(now))];
-      lines.push(
-        `today: ${day ? `${kwh(day.attributed_j)} kWh · ${day.cost.toFixed(4)} ${rate.currency}` : "no energy recorded yet"} (raw ${kwh(day?.raw_j ?? 0)} kWh)`,
-      );
-    } else {
+  async function reportData(
+    scope: "session" | "today" | "all",
+    sessionID: string,
+  ): Promise<ReportData> {
+    const now = Date.now();
+    const rate = rateFor(undefined, new Date(now));
+    const sessionEntry = state.sessions[sessionID] ?? null;
+    const dayEntry = state.days[dayKey(new Date(now))] ?? null;
+    let totals: ReportData["totals"] = null;
+    if (scope === "all") {
       let attributed = 0;
       let raw = 0;
       let costTotal = 0;
@@ -276,12 +271,96 @@ export function createEngine(
         raw += day.raw_j;
         costTotal += day.cost;
       }
+      totals = {
+        attributed_kwh: attributed / JOULES_PER_KWH,
+        cost: costTotal,
+        raw_kwh: raw / JOULES_PER_KWH,
+      };
+    }
+    const budget = cfg.daily_budget_kwh
+      ? {
+          budget_kwh: cfg.daily_budget_kwh,
+          attributed_kwh: (dayEntry?.attributed_j ?? 0) / JOULES_PER_KWH,
+        }
+      : null;
+    return {
+      scope,
+      meters: integrator.lastWatts().map((m) => ({
+        source: m.source,
+        id: m.id,
+        watts: m.watts,
+        age_s: (now - m.at) / 1000,
+      })),
+      rate,
+      baseline: cfg.subtract_idle && probes.length > 0 ? integrator.baselineProgress() : null,
+      session:
+        scope === "session" && sessionEntry
+          ? {
+              attributed_kwh: sessionEntry.attributed_j / JOULES_PER_KWH,
+              cost: sessionEntry.cost,
+              raw_kwh: sessionEntry.raw_j / JOULES_PER_KWH,
+              model: sessionEntry.model,
+            }
+          : null,
+      day:
+        scope === "today" && dayEntry
+          ? {
+              attributed_kwh: dayEntry.attributed_j / JOULES_PER_KWH,
+              cost: dayEntry.cost,
+              raw_kwh: dayEntry.raw_j / JOULES_PER_KWH,
+            }
+          : null,
+      totals,
+      probes: { ...state.probe_status },
+      budget,
+    };
+  }
+
+  async function report(scope: "session" | "today" | "all", sessionID: string): Promise<string> {
+    const data = await reportData(scope, sessionID);
+    const lines: string[] = [`power_cost (${scope})`];
+    if (probes.length === 0) {
       lines.push(
-        `all: ${kwh(attributed)} kWh · ${costTotal.toFixed(4)} ${rate.currency} (raw ${kwh(raw)} kWh)`,
+        "no meters found: configure ssh/prom targets in the plugin options, or check probe statuses below",
+      );
+    } else if (data.meters.length === 0) {
+      lines.push("no samples yet (waiting for the first sampling tick)");
+    } else {
+      for (const m of data.meters) {
+        lines.push(`now: ${m.source}:${m.id} ${m.watts.toFixed(1)} W (age ${m.age_s.toFixed(1)}s)`);
+      }
+    }
+    lines.push(
+      `rate: ${data.rate.price_per_kwh.toFixed(4)} ${data.rate.currency}/kWh (${data.rate.label}${cfg.subtract_idle ? ", idle subtracted" : ""})`,
+    );
+    if (data.baseline) {
+      lines.push(`baseline: ${data.baseline.filled}/${data.baseline.window} samples`);
+    }
+    if (data.session) {
+      lines.push(
+        `session: ${kwh(data.session.attributed_kwh * JOULES_PER_KWH)} kWh · ${data.session.cost.toFixed(4)} ${data.rate.currency} (raw ${kwh(data.session.raw_kwh * JOULES_PER_KWH)} kWh${data.session.model ? `, model ${data.session.model}` : ""})`,
+      );
+    } else if (data.scope === "session") {
+      lines.push("session: no energy recorded yet");
+    }
+    if (data.day) {
+      lines.push(
+        `today: ${kwh(data.day.attributed_kwh * JOULES_PER_KWH)} kWh · ${data.day.cost.toFixed(4)} ${data.rate.currency} (raw ${kwh(data.day.raw_kwh * JOULES_PER_KWH)} kWh)`,
+      );
+    } else if (data.scope === "today") {
+      lines.push("today: no energy recorded yet (raw 0.0000 kWh)");
+    }
+    if (data.totals) {
+      lines.push(
+        `all: ${kwh(data.totals.attributed_kwh * JOULES_PER_KWH)} kWh · ${data.totals.cost.toFixed(4)} ${data.rate.currency} (raw ${kwh(data.totals.raw_kwh * JOULES_PER_KWH)} kWh)`,
       );
     }
-
-    const statuses = Object.entries(state.probe_status);
+    if (data.budget) {
+      lines.push(
+        `budget: ${data.budget.attributed_kwh.toFixed(4)} / ${data.budget.budget_kwh.toFixed(4)} kWh today`,
+      );
+    }
+    const statuses = Object.entries(data.probes);
     if (statuses.length > 0) {
       lines.push(`probes: ${statuses.map(([source, status]) => `${source}=${status}`).join(", ")}`);
     }
@@ -295,5 +374,5 @@ export function createEngine(
     persist(true);
   };
 
-  return { state, handleStatus, handleIdle, forget, setModel, report, dispose };
+  return { state, handleStatus, handleIdle, forget, setModel, report, reportData, dispose };
 }

@@ -3,7 +3,12 @@ import { dirname } from "node:path";
 
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
-export type DayEntry = { raw_j: number; attributed_j: number; cost: number };
+export type DayEntry = {
+  raw_j: number;
+  attributed_j: number;
+  cost: number;
+  budget_warned?: boolean;
+};
 
 export type SessionEntry = {
   model: string | null;
