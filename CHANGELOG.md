@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `pnpm verify` now actually enforces the coverage gate: it runs
+  `test:coverage` and type-checks the tests (`tsconfig.test.json`), so the
+  documented thresholds (90% lines/functions, 80% branches) block a PR.
+- `@types/node` pinned to the lowest supported Node line (`^22`) instead of the
+  newest available, matching the CI matrix.
+- gitleaks runs on pull requests as well as pushes to `main`.
+
+### Fixed
+
+- Removed stale copy-paste docs: `CONTRIBUTING.md` (SQLite/mDNS) and
+  `SECURITY.md` (a `memory.db` store that does not exist here).
+- Type error in `tests/sampler.test.ts` (imported `Sample` from the wrong
+  module), now caught by the test type-check.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added
