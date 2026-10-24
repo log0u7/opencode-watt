@@ -36,10 +36,11 @@
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
+    "smoke:dist": "pnpm run build && node scripts/smoke-dist.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "verify": "pnpm run check && pnpm run typecheck && pnpm run typecheck:tests && pnpm run test:coverage",
+    "verify": "pnpm run check && pnpm run typecheck && pnpm run typecheck:tests && pnpm run test:coverage && pnpm run smoke:dist",
     "prepare": "lefthook install"
   },
   "packageManager": "pnpm@11.0.0",
