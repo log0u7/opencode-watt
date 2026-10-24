@@ -264,3 +264,34 @@ describe("opencode-watt v2 setup", () => {
     await cleanup?.();
   });
 });
+
+describe("pluginModule v1 server entry", () => {
+  it("lazily loads the v1 factory and forwards the options argument", async () => {
+    // The v1 implementation must stay out of the static import graph (v2
+    // hosts reject it at load time), so server() loads it lazily. Cover the
+    // wrapper itself: it must resolve the v1 hooks and forward the options
+    // bag. dispose() persists the engine state, so the forwarded state_path
+    // must exist afterwards.
+    const statePath = tmpStatePath();
+    const hooks = (await pluginModule.server(fakeV1Input(), baseOpts(statePath, []))) as {
+      tool?: { power_cost?: unknown };
+      dispose?: () => Promise<void> | void;
+    };
+    expect(hooks.tool?.power_cost).toBeDefined();
+    expect(hooks.dispose).toBeDefined();
+    await hooks.dispose?.();
+    expect(existsSync(statePath)).toBe(true);
+  });
+});
+
+function fakeV1Input() {
+  return {
+    client: {
+      tui: { showToast: async () => {} },
+      app: { log: async () => {} },
+    },
+    project: { id: "p" },
+    directory: "/d",
+    worktree: "/d",
+  } as never;
+}
