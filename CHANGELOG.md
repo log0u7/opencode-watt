@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README badge: added Intel RAPL (completes the NVIDIA/AMD/Intel sampling trio).
+
 ## [0.3.1] - 2026-10-24
 
 ### Fixed
