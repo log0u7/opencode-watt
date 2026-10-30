@@ -1,11 +1,11 @@
 # opencode-watt
 
 [![CI](https://github.com/log0u7/opencode-watt/actions/workflows/ci.yml/badge.svg)](https://github.com/log0u7/opencode-watt/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@log0u7/opencode-watt)](https://www.npmjs.com/package/@log0u7/opencode-watt)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/node/v/@log0u7/opencode-watt?logo=node.js&logoColor=white)](https://www.npmjs.com/package/@log0u7/opencode-watt)
-[![TypeScript](https://img.shields.io/github/package-json/dependency-version/log0u7/opencode-watt/dev/typescript?logo=typescript&logoColor=white)](https://github.com/log0u7/opencode-watt/blob/main/package.json)
+[![npm](https://img.shields.io/npm/v/@log0u7/opencode-watt)](https://www.npmjs.com/package/@log0u7/opencode-watt)
 [![Intel RAPL](https://img.shields.io/badge/Intel%20RAPL-0071C5?logo=intel&logoColor=white)](https://www.kernel.org/doc/html/latest/admin-guide/power/powercap.html)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Electric power and cost of **local LLM inference** for [OpenCode](https://opencode.ai).
 
