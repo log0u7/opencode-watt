@@ -100,9 +100,22 @@ if (!dynamicSpecs.has("./plugin.js")) {
   fail("entrypoint never dynamically imports ./plugin.js; v1 hosts would lose the server() entry");
 }
 const declaredDeps = new Set(Object.keys(pkg.dependencies ?? {}));
+function packageName(spec) {
+  if (spec.startsWith("@")) {
+    const parts = spec.split("/");
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : spec;
+  }
+  return spec.split("/")[0];
+}
 for (const spec of bareStatic) {
   if (isNodeBuiltin(spec)) continue;
-  if (!HOST_PROVIDED.has(spec) && !declaredDeps.has(spec)) {
+  const name = packageName(spec);
+  if (
+    !HOST_PROVIDED.has(name) &&
+    !HOST_PROVIDED.has(spec) &&
+    !declaredDeps.has(name) &&
+    !declaredDeps.has(spec)
+  ) {
     fail(`static import of "${spec}": not @opencode/plugin and not in package.json dependencies`);
   }
 }
