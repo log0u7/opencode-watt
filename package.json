@@ -35,7 +35,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/prepare-tui-dist.mjs",
     "build:check": "pnpm run build && pnpm pack --dry-run",
     "check": "biome check .",
     "format": "biome format --write .",
@@ -68,7 +68,10 @@
     }
   },
   "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-typescript": "^7.27.1",
     "@biomejs/biome": "2.5.15",
+    "babel-preset-solid": "^1.9.12",
     "@opencode-ai/plugin": "1.18.35",
     "@opencode-ai/sdk": "1.18.35",
     "@opencode/plugin": "2.0.26",
