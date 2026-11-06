@@ -11,7 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - TUI plugin (phase 0+1): toast, `/watt` slash command, footer status slot.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-06
+
+### Added
+
+- Live power footer: the TUI part now polls a `watt.snapshot` RPC (registered
+  server-side) every 10s and renders watts, kWh, cost and budget share in the
+  home footer status. Hidden on v1 hosts and while no meter reports.
 
 ### Changed
 
