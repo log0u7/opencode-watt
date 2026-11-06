@@ -65,6 +65,10 @@ function fakeCtx(statePath: string, probes: Probe[]) {
   >();
   const queue: TestEvent[] = [];
   let wake: (() => void) | undefined;
+  const rpcRegister = vi.fn(async (..._args: unknown[]) => ({
+    dispose: async () => {},
+    events: { emit: async () => {} },
+  }));
 
   const ctx = {
     location: { directory: "/d", project: { id: "p" } },
@@ -80,6 +84,9 @@ function fakeCtx(statePath: string, probes: Probe[]) {
       ) => {
         sessionHooks.set(name, fn);
       },
+    },
+    rpc: {
+      register: rpcRegister,
     },
     event: {
       subscribe: ({ signal }: { signal: AbortSignal }) =>
@@ -103,7 +110,7 @@ function fakeCtx(statePath: string, probes: Probe[]) {
     wake?.();
   };
 
-  return { ctx, added, sessionHooks, push };
+  return { ctx, added, sessionHooks, push, rpcRegister };
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -183,6 +190,16 @@ describe("opencode-watt v2 setup", () => {
     expect((props.scope as { enum?: string[] }).enum).toEqual([...TOOL_SCOPES]);
     expect((props.format as { enum?: string[] }).enum).toEqual([...TOOL_FORMATS]);
     await cleanup?.();
+  });
+
+  it("registers the watt snapshot RPC and disposes it on cleanup", async () => {
+    const { ctx, rpcRegister } = fakeCtx(tmpStatePath(), []);
+    const cleanup = await pluginModule.setup(ctx);
+    expect(rpcRegister).toHaveBeenCalledTimes(1);
+    const [definition] = rpcRegister.mock.calls[0] ?? [];
+    expect((definition as { id?: string } | undefined)?.id).toBe("watt");
+    await cleanup?.();
+    expect(rpcRegister.mock.results[0]?.value).toBeDefined();
   });
 
   it("logs session cost on idle when the session used more than 1 Wh", async () => {

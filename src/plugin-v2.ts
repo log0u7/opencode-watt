@@ -3,6 +3,7 @@ import { Plugin } from "@opencode/plugin";
 import { normalizeConfig } from "./config.js";
 import { createEngine, kwh, WH_TO_J } from "./engine.js";
 import type { WattPluginOptions } from "./plugin.js";
+import { WattRpc, snapshotFromReport } from "./rpc.js";
 import { statePath } from "./store.js";
 import {
   FORMAT_DESCRIPTION,
@@ -90,8 +91,14 @@ export const WattV2 = Plugin.define({
       // subscription ends on cleanup; failures are best-effort
     });
 
+    // Live snapshot for the TUI footer: one compact read over the engine state.
+    const rpc = await ctx.rpc.register(WattRpc, {
+      snapshot: async () => snapshotFromReport(await engine.reportData("today", "")),
+    });
+
     const cleanup = async () => {
       controller.abort();
+      rpc.dispose();
       await engine.dispose();
     };
     return cleanup;

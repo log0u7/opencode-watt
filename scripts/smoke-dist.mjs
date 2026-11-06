@@ -37,7 +37,16 @@ const DYNAMIC_SPEC = /\bimport\s*\(\s*(["'])((?:[^"'\\])+)\1\s*\)/g;
 
 // Hosts provide their own plugin API module; it must never be shipped or
 // installed as a runtime dependency of this package.
-const HOST_PROVIDED = new Set(["@opencode/plugin"]);
+// Packages the host resolves at runtime: the server SDK on the server side, and
+// the TUI runtime's own OpenTUI/Solid on the TUI side (the ./tui entry imports
+// them; the TUI host loads plugins with its own copies).
+const HOST_PROVIDED = new Set([
+  "@opencode/plugin",
+  "@opencode-ai/plugin",
+  "solid-js",
+  "@opentui/core",
+  "@opentui/solid",
+]);
 
 // Node builtins resolve everywhere; anything else bare must be declared.
 function isNodeBuiltin(spec) {
