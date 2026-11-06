@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - TUI plugin (phase 0+1): toast, `/watt` slash command, footer status slot.
 
+## [0.6.0] - 2026-11-06
+
+### Added
+
+- Themed footer: the status slot now uses the host theme (bold "Watt" label,
+  muted values) instead of unthemed plain text.
+- Event-driven refresh: the footer refreshes reactively on session status and
+  message events (150ms debounce), with the 10s interval as fallback.
+- `/watt` dialog: the slash command now opens a full snapshot dialog (watts,
+  kWh, cost, budget bar) instead of a toast.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatSnapshot, snapshotFromReport } from "../src/rpc.js";
+import { budgetBar, formatSnapshot, snapshotFromReport } from "../src/rpc.js";
 
 describe("snapshotFromReport", () => {
   it("sums live meter watts and keeps the day totals", () => {
@@ -91,5 +91,21 @@ describe("formatSnapshot", () => {
         budget_used_ratio: null,
       }),
     ).toBeNull();
+  });
+});
+
+describe("budgetBar", () => {
+  it("fills the bar proportionally to the budget used", () => {
+    expect(budgetBar(0.25, 20)).toBe("█████░░░░░░░░░░░░░░░ 25%");
+    expect(budgetBar(0.5, 20)).toBe("██████████░░░░░░░░░░ 50%");
+    expect(budgetBar(0, 20)).toBe("░░░░░░░░░░░░░░░░░░░░ 0%");
+  });
+
+  it("clamps ratios above 1 to a full bar", () => {
+    expect(budgetBar(1.5, 20)).toBe("████████████████████ 150%");
+  });
+
+  it("handles the null ratio (no budget)", () => {
+    expect(budgetBar(null, 20)).toBeNull();
   });
 });
