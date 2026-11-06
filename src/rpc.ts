@@ -47,6 +47,15 @@ export function snapshotFromReport(data: SnapshotInput): WattSnapshot {
 
 /** One footer line: "142 W · 0.050 kWh · €0.0123 · 3% of 2 kWh budget". Null when
  * there is nothing to show, so the slot stays hidden instead of rendering dashes. */
+/** Budget bar for the /watt dialog: "█████░░░░░ 25%" at the given width.
+ * Returns null when there is no budget, so the dialog omits the line. */
+export function budgetBar(ratio: number | null, width: number): string | null {
+  if (ratio === null) return null;
+  const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
+  const bar = "█".repeat(filled) + "░".repeat(width - filled);
+  return `${bar} ${Math.round(ratio * 100)}%`;
+}
+
 export function formatSnapshot(s: WattSnapshot): string | null {
   const parts: string[] = [];
   if (s.watts !== null) {

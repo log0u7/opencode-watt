@@ -123,8 +123,10 @@ totals themselves are not converted.
 - **Toast**: when a session ends having consumed more than 1 Wh, a TUI toast
   shows the session's kWh and cost.
 - **TUI**: the plugin ships a TUI part (auto-loaded by OpenCode): a toast on
-  load, a `/watt` slash command, and a status slot in the home footer. Slash
-  commands and the `power_cost` tool remain the primary interface.
+  load, a `/watt` slash command, and a themed status slot in the home footer
+  that refreshes reactively on session events. The `/watt` command opens a
+  dialog with the full snapshot (watts, kWh, cost, budget bar). Slash commands
+  and the `power_cost` tool remain the primary interface.
 
 - **State**: `$XDG_DATA_HOME/opencode-watt/state.json` (default
   `~/.local/share/opencode-watt/state.json`), atomic writes, sessions pruned
