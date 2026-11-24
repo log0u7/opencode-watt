@@ -14,6 +14,7 @@ import {
   raplProbes,
   rocmSmiProbe,
   type ListFn,
+  PROBE_CACHE_MS,
   sshProbes,
 } from "../src/probes.js";
 
@@ -491,8 +492,8 @@ describe("sshProbes()", () => {
       return { ok: true, stdout: "===WATT-NVIDIA===\n" } as ExecResult;
     };
     const probes = sshProbes(exec, { host: "ricinus", timeout_ms: 1000 });
-    await Promise.all(probes.map((p) => p.sample(1)));
-    await Promise.all(probes.map((p) => p.sample(2)));
+    await Promise.all(probes.map((p) => p.sample(0)));
+    await Promise.all(probes.map((p) => p.sample(PROBE_CACHE_MS)));
 
     expect(args).toHaveLength(2);
     expect(args.every((a) => a[0] === "-n")).toBe(true);
@@ -516,6 +517,83 @@ describe("sshProbes()", () => {
     expect(args).toHaveLength(1);
     expect(args[0].some((a) => a.includes("ControlMaster"))).toBe(false);
     expect(args[0].includes("BatchMode=yes")).toBe(true);
+  });
+});
+
+describe("probe cache", () => {
+  it("nvidiaSmiProbe: 30 consecutive 1s ticks = 1 subprocess, fresh reading after the TTL", async () => {
+    const exec = vi.fn(okExec("0, RTX, 47.2")) as unknown as ExecFn;
+    const probe = nvidiaSmiProbe(exec, "local", 1000);
+    for (let t = 0; t < 30; t++) await probe.sample(t * 1000);
+    expect(exec).toHaveBeenCalledTimes(1);
+    const res = await probe.sample(30 * 1000);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(res.samples).toEqual([
+      { kind: "power", source: "nvidia-smi@local", id: "gpu0", watts: 47.2, at: 30_000 },
+    ]);
+  });
+
+  it("rocmSmiProbe: replays the reading within the TTL window", async () => {
+    const exec = vi.fn(okExec('{"card0": {"Power": "12 W"}}')) as unknown as ExecFn;
+    const probe = rocmSmiProbe(exec, "local", 1000);
+    await probe.sample(0);
+    await probe.sample(1000);
+    await probe.sample(29_000);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect((await probe.sample(29_000)).samples).toHaveLength(1);
+    await probe.sample(PROBE_CACHE_MS);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it("never caches a failed probe: the Guard keeps its retry schedule", async () => {
+    let calls = 0;
+    const exec: ExecFn = async () => {
+      calls++;
+      return { ok: false, code: "TIMEOUT" } as ExecResult;
+    };
+    const probe = nvidiaSmiProbe(exec, "local", 1000);
+    await probe.sample(0);
+    await probe.sample(1000);
+    expect(calls).toBe(2);
+  });
+
+  it("sshProbes: 30 consecutive ticks = 1 ssh exec per target, fresh after the TTL", async () => {
+    let calls = 0;
+    const exec: ExecFn = async () => {
+      calls++;
+      return {
+        ok: true,
+        stdout:
+          "===WATT-NVIDIA===\n0, RTX, 47\n===WATT-ROCM===\n===WATT-RAPL===\n===WATT-HWMON===\n",
+      } as ExecResult;
+    };
+    const probes = sshProbes(exec, { host: "ricinus", timeout_ms: 1000 });
+    for (let t = 0; t < 30; t++) await Promise.all(probes.map((p) => p.sample(t * 1000)));
+    expect(calls).toBe(1);
+    await Promise.all(probes.map((p) => p.sample(30 * 1000)));
+    expect(calls).toBe(2);
+  });
+
+  it("replays the cached batch without re-sighting the RAPL counter", async () => {
+    let calls = 0;
+    const exec: ExecFn = async () => {
+      calls++;
+      return {
+        ok: true,
+        stdout:
+          "===WATT-NVIDIA===\n0, RTX, 47\n===WATT-ROCM===\n===WATT-RAPL===\nZONE /sys/class/powercap/intel-rapl:0\nNAME package-0\nUJ 2000000\nMAX 262143328850\n===WATT-HWMON===\n",
+      } as ExecResult;
+    };
+    const probes = sshProbes(exec, { host: "ricinus", timeout_ms: 1000 });
+    const fresh = await Promise.all(probes.map((p) => p.sample(0)));
+    const replay = await Promise.all(probes.map((p) => p.sample(1000)));
+    expect(calls).toBe(1);
+    expect(fresh[2]?.samples).toHaveLength(1); // counter sighted on the fresh batch
+    expect(replay[2]?.samples).toHaveLength(0); // skipped: no stale delta, no rate spike
+    expect(replay[2]?.status).toBe("ok");
+    expect(replay[0]?.samples).toEqual([
+      { kind: "power", source: "nvidia-smi@ricinus", id: "gpu0", watts: 47, at: 1000 },
+    ]); // power sections still report from the cached stdout
   });
 });
 
