@@ -45,8 +45,10 @@ export function snapshotFromReport(data: SnapshotInput): WattSnapshot {
   };
 }
 
-/** One footer line: "142 W · 0.050 kWh · €0.0123 · 3% of 2 kWh budget". Null when
- * there is nothing to show, so the slot stays hidden instead of rendering dashes. */
+/** One footer line: "↯142 W · 0.050 kWh · €0.0123 · 3% of 2 kWh budget" — the
+ * reserved ↯ glyph (U+21AF, East Asian Width neutral) prefixes the values.
+ * Null when there is nothing to show, so the slot stays hidden instead of
+ * rendering dashes. */
 /** Budget bar for the /watt dialog: "█████░░░░░ 25%" at the given width.
  * Returns null when there is no budget, so the dialog omits the line. */
 export function budgetBar(ratio: number | null, width: number): string | null {
@@ -76,7 +78,7 @@ export function formatSnapshot(s: WattSnapshot): string | null {
   if (s.budget_used_ratio !== null && s.budget_kwh !== null) {
     parts.push(`${Math.round(s.budget_used_ratio * 100)}% of ${s.budget_kwh} kWh budget`);
   }
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return parts.length > 0 ? `↯${parts.join(" · ")}` : null;
 }
 
 export const WattRpc = Rpc.define({

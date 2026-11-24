@@ -65,6 +65,8 @@ describe("formatSnapshot", () => {
     expect(text).toContain("143 W");
     expect(text).toContain("0.050 kWh");
     expect(text).toContain("€0.01");
+    expect(text?.startsWith("↯")).toBe(true);
+    expect(text).toContain("↯143 W");
   });
 
   it("adds the budget share when a budget is set", () => {
@@ -77,7 +79,21 @@ describe("formatSnapshot", () => {
       budget_used_ratio: 0.25,
     });
     expect(text).toContain("25% of 2 kWh budget");
+    expect(text).toContain("↯0.500 kWh");
     expect(text).not.toContain("W ·");
+  });
+
+  it("renders the collapsed header exactly as pinned (PO spec)", () => {
+    expect(
+      formatSnapshot({
+        watts: null,
+        day_kwh: 0,
+        day_cost: 0,
+        currency: "EUR",
+        budget_kwh: null,
+        budget_used_ratio: null,
+      }),
+    ).toBe("↯0.000 kWh · €0.00");
   });
 
   it("returns null when there is nothing to show", () => {

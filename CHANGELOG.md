@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-24
+
+### Added
+
+- The collapsed header now shows the reserved `↯` glyph (U+21AF) before the
+  values: `Watt ↯0.000 kWh · €0.00`. The glyph is East Asian Width neutral, so
+  it needs no extra spacing (unlike the ambiguous-width glyphs fixed in the
+  mesh and memory panels this week).
+
+### Fixed
+
+- Exec-backed probes are cached per meter identity for 30 seconds (the same
+  short-TTL pattern as the sibling plugins): 30 consecutive ticks now spawn
+  1 subprocess instead of 30 for nvidia-smi, rocm-smi and the batched ssh
+  exec. Failures are never cached, so the retry schedule is unchanged, and the
+  ssh batch replay skips the RAPL counter sighting so energy deltas keep the
+  correct rate instead of folding a cached window into a short span.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added

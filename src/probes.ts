@@ -252,9 +252,32 @@ function guardedProbe(source: string, run: (now: number) => Promise<ProbeResult>
   };
 }
 
+// Exec-backed meters spawn a process per sample (a nvidia-smi run costs tens of
+// ms, one ssh exec per target per tick). The measured draw moves slowly, so a
+// reading is cached per probe identity (the closure: source + fixed args) for
+// PROBE_CACHE_MS; within the window a sample replays the last reading. The
+// engine re-stamps samples with the tick time, so integration keeps
+// watts x real span. Failures are never cached: the Guard keeps its own
+// retry schedule (same short-TTL pattern as mesh's cachedProvider).
+export const PROBE_CACHE_MS = 30_000;
+
+function cachedProbe(source: string, run: (now: number) => Promise<ProbeResult>): Probe {
+  let cached: ProbeResult | null = null;
+  let cachedAt = -Infinity;
+  return guardedProbe(source, async (now) => {
+    if (cached && now - cachedAt < PROBE_CACHE_MS) return cached;
+    const res = await run(now);
+    if (res.status === "ok") {
+      cached = res;
+      cachedAt = now;
+    }
+    return res;
+  });
+}
+
 export function nvidiaSmiProbe(exec: ExecFn, target: string, timeoutMs: number): Probe {
   const source = `nvidia-smi@${target}`;
-  return guardedProbe(source, async (now) => {
+  return cachedProbe(source, async (now) => {
     const res = await exec(
       "nvidia-smi",
       ["--query-gpu=index,name,power.draw", "--format=csv,noheader,nounits"],
@@ -268,7 +291,7 @@ export function nvidiaSmiProbe(exec: ExecFn, target: string, timeoutMs: number):
 
 export function rocmSmiProbe(exec: ExecFn, target: string, timeoutMs: number): Probe {
   const source = `rocm-smi@${target}`;
-  return guardedProbe(source, async (now) => {
+  return cachedProbe(source, async (now) => {
     const res = await exec("rocm-smi", ["--showpower", "--json"], timeoutMs);
     if (!res.ok) return { samples: [], status: statusFromExec(res.code) };
     const samples = rocmSamples(source, parseRocmJson(res.stdout), now);
@@ -490,63 +513,83 @@ export function sshProbes(exec: ExecFn, target: SshTarget): Probe[] {
   }
   args.push(host, script);
 
-  // One ssh exec per tick, shared across the section probes.
-  let batchAt = -1;
-  let batch: Promise<{ ok: boolean; stdout: string }> | null = null;
+  // One ssh exec per PROBE_CACHE_MS, shared across the section probes. Hits
+  // replay the cached stdout with fresh=false, so the counter section (RAPL)
+  // skips the stale sighting instead of folding a whole cached window into a
+  // short span, which would spike the derived rate. Failures clear the cache:
+  // the Guard keeps its own retry schedule.
+  let last: { ok: boolean; stdout: string; startedAt: number } | null = null;
+  let inflight: Promise<{ ok: boolean; stdout: string; startedAt: number }> | null = null;
   let lastStdout = "";
   const guard = new Guard();
 
-  const runBatch = (now: number): Promise<{ ok: boolean; stdout: string }> => {
-    if (batchAt === now && batch) return batch;
-    batchAt = now;
-    batch = guard
-      .run(async () => {
-        const res = await exec("ssh", args, timeout);
-        if (!res.ok) {
-          lastStdout = "";
-          // ssh reports connection failures as a non-zero exit (255)
-          return {
-            samples: [],
-            status: res.code === "EXIT" ? "unreachable" : statusFromExec(res.code),
-          };
-        }
-        lastStdout = res.stdout;
-        return { samples: [], status: "ok" as ProbeStatus };
-      })
-      .then(() => ({ ok: guard.status === "ok", stdout: lastStdout }));
-    return batch;
+  const runBatch = (now: number): Promise<{ ok: boolean; stdout: string; fresh: boolean }> => {
+    if (last && now - last.startedAt < PROBE_CACHE_MS) {
+      return Promise.resolve({ ok: true, stdout: last.stdout, fresh: false });
+    }
+    if (!inflight) {
+      const startedAt = now;
+      inflight = guard
+        .run(async () => {
+          const res = await exec("ssh", args, timeout);
+          if (!res.ok) {
+            lastStdout = "";
+            // ssh reports connection failures as a non-zero exit (255)
+            return {
+              samples: [],
+              status: res.code === "EXIT" ? "unreachable" : statusFromExec(res.code),
+            };
+          }
+          lastStdout = res.stdout;
+          return { samples: [], status: "ok" as ProbeStatus };
+        })
+        .then(() => {
+          const done = { ok: guard.status === "ok", stdout: lastStdout, startedAt };
+          inflight = null;
+          last = done.ok ? done : null;
+          return done;
+        });
+    }
+    return inflight.then((r) => ({ ok: r.ok, stdout: r.stdout, fresh: r.startedAt === now }));
   };
 
   const make = (
     source: string,
-    extract: (stdout: string, now: number) => { samples: Sample[]; status: ProbeStatus },
+    extract: (
+      stdout: string,
+      now: number,
+      fresh: boolean,
+    ) => { samples: Sample[]; status: ProbeStatus },
   ): Probe => ({
     source,
     sample: async (now: number) => {
       const res = await runBatch(now);
       if (!res.ok) return { samples: [], status: guard.status };
-      return extract(res.stdout, now);
+      return extract(res.stdout, now, res.fresh);
     },
   });
 
   return [
-    make(`nvidia-smi@${host}`, (stdout, now) => {
+    make(`nvidia-smi@${host}`, (stdout, now, _fresh) => {
       const rows = parseNvidiaCsv(section(stdout, SEP_NVIDIA, SEP_ROCM));
       const samples = nvidiaSamples(`nvidia-smi@${host}`, rows, now);
       return { samples, status: samples.length > 0 ? "ok" : "absent" };
     }),
-    make(`rocm-smi@${host}`, (stdout, now) => {
+    make(`rocm-smi@${host}`, (stdout, now, _fresh) => {
       const rows = parseRocmJson(section(stdout, SEP_ROCM, SEP_RAPL));
       const samples = rocmSamples(`rocm-smi@${host}`, rows, now);
       return { samples, status: samples.length > 0 ? "ok" : "absent" };
     }),
-    make(`rapl@${host}`, (stdout, now) => {
+    make(`rapl@${host}`, (stdout, now, fresh) => {
       const zones = parseRaplText(section(stdout, SEP_RAPL, SEP_HWMON));
       if (zones.length === 0) return { samples: [], status: "absent" };
+      // Counter meters must not re-sight a cached window: the next fresh delta
+      // covers the whole span with the correct rate.
+      if (!fresh) return { samples: [], status: "ok" };
       const samples = raplSamples(`rapl@${host}`, zones, now);
       return { samples, status: samples.length > 0 ? "ok" : "denied" };
     }),
-    make(`hwmon@${host}`, (stdout, now) => {
+    make(`hwmon@${host}`, (stdout, now, _fresh) => {
       const samples = hwmonSamples(
         `hwmon@${host}`,
         parseHwmonLines(section(stdout, SEP_HWMON, "")),
